@@ -1,0 +1,6 @@
+[
+  {"name": "Steven", "role": "ADMIN", "household": "Steve and Sam Hintze", "email": "sjhintze@gmail.com"},
+  {"name": "Samantha", "role": "ADMIN", "household": "Steve and Sam Hintze", "email": "wife@example.com"},
+  {"name": "Shawn", "role": "ADULT", "household": "Shawn's House", "email": "shawn@example.com"},
+  {"name": "Dwyer", "role": "CHILD", "household": "Steve and Sam Hintze", "email": "dwyer@hintze.family"}
+]
