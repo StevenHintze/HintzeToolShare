@@ -1,27 +1,60 @@
 import streamlit as st
 from data_manager import DataManager
-from ontology import FAMILY_TOOLS, FAMILY_TREE, check_safety
+# FIX 1: Don't import FAMILY_TREE (it lives in the DB/JSON now)
+from ontology import FAMILY_TOOLS, check_safety 
+import time
 
-# 1. Setup & Config
 st.set_page_config(page_title="HFTS", page_icon="🛠️")
-st.title("🛠️ Hintze Family Tool Share")
 
-# Initialize Database
+# Initialize DB
 dm = DataManager()
-dm.seed_data(FAMILY_TOOLS, FAMILY_TREE)
+# FIX 2: Pass empty list [] for family so we don't overwrite the Admin data
+dm.seed_data(FAMILY_TOOLS, [])
 
-# 2. Sidebar - User Selection
-st.sidebar.header("Pick Your Name")
-family_df = dm.get_family_members()
-current_user_name = st.sidebar.selectbox("Select Name", family_df['name'])
-current_user_role = dm.get_user_role(current_user_name)
-st.sidebar.info(f"Logged in as: **{current_user_role}**")
+# --- AUTHENTICATION LOGIC ---
+if "user_info" not in st.session_state:
+    st.session_state["user_info"] = None
 
-# Hard Reset Button (Use once to load new data, then ignore)
-if st.sidebar.button("⚠️ Reset Tool List"):
-    dm.con.execute("DROP TABLE IF EXISTS tools")
-    dm.con.execute("DROP TABLE IF EXISTS family")
-    st.warning("Updated the tool list - click refresh please.")
+def login():
+    # Use .get() to avoid errors if key is missing
+    email = st.session_state.get("email_input", "").strip().lower()
+    password = st.session_state.get("password_input", "")
+    
+    # 1. Check Shared Password (Gatekeeper)
+    if password == st.secrets["FAMILY_PASSWORD"]:
+        # 2. Check Email (Identity)
+        user = dm.get_user_by_email(email)
+        if user:
+            st.session_state["user_info"] = user
+            st.success(f"Welcome back, {user['name']}!")
+            time.sleep(1)
+            st.rerun()
+        else:
+            st.error("Email not found in the Family Registry.")
+    else:
+        st.error("Incorrect Family Password.")
+
+# Show Login Screen if not logged in
+if st.session_state["user_info"] is None:
+    st.title("🔐 Family Login")
+    st.text_input("Email Address", key="email_input")
+    st.text_input("Family Password", type="password", key="password_input")
+    st.button("Log In", on_click=login)
+    st.stop() # Stop here until logged in
+
+# --- APP STARTS HERE (Only runs if logged in) ---
+current_user = st.session_state["user_info"]
+st.title(f"🛠️ Hintze Family Tool Share")
+
+# Sidebar Profile
+st.sidebar.header("My Profile")
+st.sidebar.write(f"**Name:** {current_user['name']}")
+st.sidebar.write(f"**Role:** {current_user['role']}")
+st.sidebar.write(f"**House:** {current_user['household']}")
+
+if st.sidebar.button("Log Out"):
+    st.session_state["user_info"] = None
+    st.rerun()
 
 # 3. Main Interface
 tab1, tab2 = st.tabs(["Borrow Tools", "Return Tools"])
@@ -35,7 +68,6 @@ with tab1:
     # Filter Logic
     available_tools = dm.get_available_tools()
     if search_query:
-        # Simple case-insensitive search
         available_tools = available_tools[available_tools['capabilities'].str.contains(search_query, case=False, na=False)]
     
     st.dataframe(available_tools[['name', 'safety_rating', 'capabilities', 'owner']])
@@ -52,13 +84,18 @@ with tab1:
                 # Safety Check
                 tool_safety = available_tools.loc[available_tools['name'] == selected_tool_name, 'safety_rating'].iloc[0]
                 
-                if check_safety(current_user_role, tool_safety):
+                # FIX 3: Use current_user['role'] instead of current_user_role
+                if check_safety(current_user['role'], tool_safety):
                     tool_id = available_tools.loc[available_tools['name'] == selected_tool_name, 'id'].iloc[0]
-                    dm.borrow_tool(tool_id, current_user_name, days_needed)
+                    
+                    # FIX 4: Use current_user['name'] instead of current_user_name
+                    dm.borrow_tool(tool_id, current_user['name'], days_needed)
+                    
                     st.success(f"✅ Tool borrowed - have fun or good luck! {selected_tool_name}.")
                     st.rerun()
                 else:
-                    st.error(f"🚫 STOP: {current_user_name} ({current_user_role}) is not allowed to borrow '{selected_tool_name}' ({tool_safety}).")
+                    # FIX 5: Use dict keys for error message
+                    st.error(f"🚫 STOP: {current_user['name']} ({current_user['role']}) is not allowed to borrow '{selected_tool_name}' ({tool_safety}).")
     else:
         st.info("Looks like no-one has a tool that fits the bill.")
 
