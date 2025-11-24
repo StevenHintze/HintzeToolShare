@@ -34,10 +34,11 @@ def login():
 
 # Show Login Screen if not logged in
 if st.session_state["user_info"] is None:
-    st.title("🔐 Family Login")
+    st.title("🔐 Login with your email and shared password")
     st.text_input("Email Address", key="email_input")
     st.text_input("Family Password", type="password", key="password_input")
-    st.button("Log In", on_click=login)
+    if st.button("Log In"):
+        login()
     st.stop() # Stop here until logged in
 
 # --- APP STARTS HERE (Only runs if logged in) ---
