@@ -1,6 +1,5 @@
 import streamlit as st
 from data_manager import DataManager
-# FIX 1: Don't import FAMILY_TREE (it lives in the DB/JSON now)
 from ontology import FAMILY_TOOLS, check_safety 
 import time
 
@@ -8,7 +7,6 @@ st.set_page_config(page_title="HFTS", page_icon="🛠️")
 
 # Initialize DB
 dm = DataManager()
-# FIX 2: Pass empty list [] for family so we don't overwrite the Admin data
 dm.seed_data(FAMILY_TOOLS, [])
 
 # --- AUTHENTICATION LOGIC ---
@@ -20,7 +18,7 @@ def login():
     email = st.session_state.get("email_input", "").strip().lower()
     password = st.session_state.get("password_input", "")
     
-    # 1. Check Shared Password (Gatekeeper)
+    # 1. Check Password (Gatekeeper)
     if password == st.secrets["FAMILY_PASSWORD"]:
         # 2. Check Email (Identity)
         user = dm.get_user_by_email(email)
