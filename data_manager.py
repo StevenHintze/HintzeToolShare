@@ -4,19 +4,22 @@ import pandas as pd
 
 class DataManager:
     def __init__(self):
-        # Connect to MotherDuck using the token in .streamlit/secrets.toml
         try:
             token = st.secrets["MOTHERDUCK_TOKEN"]
-            self.con_str = f'md:hintze_inventory?motherduck_token={token}'
+            self.con_str = f'md:?motherduck_token={token}'
         except FileNotFoundError:
-            # Fallback for local testing if secrets are missing
             self.con_str = 'inventory.db' 
         
         self.con = duckdb.connect(self.con_str)
+        
+        # Ensure we are in the right database
+        self.con.execute("CREATE DATABASE IF NOT EXISTS hintze_inventory")
+        self.con.execute("USE hintze_inventory")
+        
         self._init_schema()
 
     def _init_schema(self):
-        # 1. Create Tools Table
+        # Tools Table
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS tools (
                 id VARCHAR PRIMARY KEY,
@@ -30,12 +33,13 @@ class DataManager:
             )
         """)
         
-        # 2. Create Family Table (This handles your dynamic roles)
+        # Family Table - NOW WITH EMAIL
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS family (
-                name VARCHAR PRIMARY KEY,
+                name VARCHAR,
                 role VARCHAR,
-                household VARCHAR
+                household VARCHAR,
+                email VARCHAR PRIMARY KEY
             )
         """)
 
@@ -59,17 +63,17 @@ class DataManager:
         self.con.execute(f"UPDATE tools SET status='Available', borrower=NULL, due_date=NULL WHERE id='{tool_id}'")
 
     # --- Family Methods ---
-    def get_family_members(self):
-        """Fetches the dynamic list of family members."""
-        return self.con.execute("SELECT * FROM family ORDER BY name").df()
-
-    def get_user_role(self, user_name):
-        """Finds the role for safety checks."""
-        result = self.con.execute(f"SELECT role FROM family WHERE name = '{user_name}'").fetchone()
-        return result[0] if result else "CHILD"
+    def get_user_by_email(self, email):
+        """Returns the user dictionary if email exists, else None."""
+        # This is the function that was missing!
+        result = self.con.execute("SELECT name, role, household FROM family WHERE email = ?", [email]).fetchone()
+        
+        if result:
+            return {"name": result[0], "role": result[1], "household": result[2]}
+        return None
 
     def seed_data(self, tools_list, family_list):
-        # Seed Tools if empty
+        # Seed Tools
         if self.con.execute("SELECT count(*) FROM tools").fetchone()[0] == 0:
             print("Seeding Tools...")
             for tool in tools_list:
@@ -78,9 +82,9 @@ class DataManager:
                 self.con.execute("INSERT INTO tools VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
                     (tool['id'], tool['name'], tool['owner'], 'Available', None, None, caps, tool['safety']))
 
-        # Seed Family if empty
-        if self.con.execute("SELECT count(*) FROM family").fetchone()[0] == 0:
+        # Seed Family (Handles empty lists gracefully now)
+        if family_list and self.con.execute("SELECT count(*) FROM family").fetchone()[0] == 0:
             print("Seeding Family Tree...")
             for person in family_list:
-                self.con.execute("INSERT INTO family VALUES (?, ?, ?)", 
-                    (person['name'], person['role'], person['household']))
+                self.con.execute("INSERT INTO family VALUES (?, ?, ?, ?)", 
+                    (person['name'], person['role'], person['household'], person['email']))
