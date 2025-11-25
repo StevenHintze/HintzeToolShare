@@ -12,16 +12,16 @@ def get_ai_advice(user_query, available_tools_df):
         return "⚠️ Error: Gemini API Key missing or invalid."
 
     # Format Inventory
-    # UPDATED: Includes Brand and Model in the context so the Shop Teacher is smarter
     tool_context = ""
     for index, row in available_tools_df.iterrows():
-        # Handle missing columns gracefully if DB schema is old
+        # Handle missing columns gracefully
         brand = row.get('brand', '')
         model = row.get('model_no', '')
         details = f"{brand} {model}".strip()
         
         tool_context += f"- {row['name']} [{details}] (Safety: {row['safety_rating']}, Caps: {row['capabilities']})\n"
 
+    # Note: We use f-strings here. 
     prompt = f"""
     You are the "Hintze Family Tool Manager." 
     
@@ -41,7 +41,6 @@ def get_ai_advice(user_query, available_tools_df):
     """
 
     try:
-        # Use a widely available model
         model = genai.GenerativeModel('gemini-2.5-flash') 
         response = model.generate_content(prompt)
         return response.text
@@ -56,7 +55,7 @@ def ai_parse_tool(raw_text):
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        # UPDATED PROMPT: Now asks for Brand, Model, and Power
+        # Note: In f-strings, we must use double braces {{ }} for literal JSON
         prompt = f"""
         You are an inventory assistant. Analyze this tool description and extract structured data.
         
@@ -68,9 +67,6 @@ def ai_parse_tool(raw_text):
         3. Model: The specific model number (e.g. DCF887). If none, use "".
         4. Power: "Corded", "Battery", "Gas", or "Manual".
         5. Safety: Strictly choose one: "Open", "Supervised", or "Adult Only".
-           - "Open": Simple hand tools (screwdrivers, hammers).
-           - "Supervised": Complex hand tools or simple power tools.
-           - "Adult Only": Dangerous power tools (saws, grinders).
         6. Capabilities: A clean string of 3-5 comma-separated keywords.
         
         OUTPUT FORMAT:
@@ -90,4 +86,4 @@ def ai_parse_tool(raw_text):
         return json.loads(clean_text)
         
     except Exception as e:
-        return Nonegit add gemini_helper.py app.py
+        return None
