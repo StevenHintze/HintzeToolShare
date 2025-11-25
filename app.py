@@ -5,6 +5,7 @@ from tools_registry import check_safety
 from gemini_helper import ai_parse_tool, get_ai_advice
 import time
 import datetime
+import uuid
 
 st.set_page_config(page_title="HFTS", page_icon="🛠️")
 
@@ -105,7 +106,8 @@ with current_tabs[0]:
     if search_query:
         available_tools = available_tools[available_tools['capabilities'].str.contains(search_query, case=False, na=False)]
     
-    st.dataframe(available_tools[['name', 'household', 'safety_rating', 'capabilities', 'owner']])
+    # Added Brand, Model, Location to display
+    st.dataframe(available_tools[['name', 'brand', 'bin_location', 'household', 'safety_rating', 'capabilities']])
 
     st.subheader("Checkout")
     if not available_tools.empty:
@@ -128,7 +130,9 @@ with current_tabs[1]:
     st.header("Return Tools")
     borrowed_tools = dm.get_borrowed_tools()
     if not borrowed_tools.empty:
-        st.dataframe(borrowed_tools[['name', 'borrower', 'due_date']])
+        # UPDATED COLUMN NAME HERE
+        st.dataframe(borrowed_tools[['name', 'borrower', 'return_date']])
+        
         tool_to_return = st.selectbox("Select Tool", borrowed_tools['name'])
         if st.button("Mark it Returned"):
             tool_id = borrowed_tools.loc[borrowed_tools['name'] == tool_to_return, 'id'].iloc[0]
@@ -155,27 +159,36 @@ if current_user['role'] == "ADMIN":
         st.header("Add New Tool")
         
         # --- SECTION 1: AI HELPER ---
-        st.markdown("### 🤖 Step 1: Describe Tool")
+        st.markdown("### 🤖 Step 1: Scan Tool")
         st.info("Select the owner, paste the description, and click Auto-Fill.")
         
-        quick_owner = st.selectbox("Who owns it?", ALL_OWNERS, key="ai_owner_select")
-        raw_input = st.text_input("Paste Description (Tool model number and brand, Amazon title, etc.)", key="ai_input")
-        
-        if st.button("✨ AI Auto-Fill", use_container_width=True):
-            if raw_input:
-                with st.spinner("Analyzing..."):
-                    ai_data = ai_parse_tool(raw_input)
-                    if ai_data:
-                        st.session_state['form_name'] = ai_data['name']
-                        st.session_state['form_caps'] = ai_data['capabilities']
-                        try:
-                            st.session_state['form_safety_index'] = ["Open", "Supervised", "Adult Only"].index(ai_data['safety'])
-                        except:
-                            st.session_state['form_safety_index'] = 0
-                        
-                        st.session_state['form_owner'] = quick_owner
-                        st.session_state['form_household'] = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0])
-                        st.success("AI Generated Details - Check Step 2 below.")
+        # Layout
+        col_ai_1, col_ai_2, col_ai_3 = st.columns([1, 2, 1])
+        with col_ai_1:
+            # Searchable, defaults to None (Blank)
+            quick_owner = st.selectbox("Who bought it?", ALL_OWNERS, index=None, placeholder="Type to search...", key="ai_owner_select")
+        with col_ai_2:
+            raw_input = st.text_input("Paste Description", key="ai_input", label_visibility="collapsed")
+        with col_ai_3:
+            if st.button("✨ Auto-Fill", use_container_width=True):
+                if raw_input:
+                    with st.spinner("Analyzing..."):
+                        ai_data = ai_parse_tool(raw_input)
+                        if ai_data:
+                            st.session_state['form_name'] = ai_data['name']
+                            st.session_state['form_caps'] = ai_data['capabilities']
+                            try:
+                                st.session_state['form_safety_index'] = ["Open", "Supervised", "Adult Only"].index(ai_data['safety'])
+                            except:
+                                st.session_state['form_safety_index'] = 0
+                            
+                            # Logic: If user selected an owner in Step 1, use it. 
+                            # If not, check if AI guessed it (rare), otherwise leave blank.
+                            if quick_owner:
+                                st.session_state['form_owner'] = quick_owner
+                                st.session_state['form_household'] = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0])
+                            
+                            st.success("✅ Parsed! Check Step 2 below.")
             else:
                 st.error("Please paste a description first.")
 
@@ -185,30 +198,57 @@ if current_user['role'] == "ADMIN":
         st.markdown("### 📝 Step 2: Review & Save")
         
         with st.form("add_tool"):
+            # Session State Init
             if 'form_name' not in st.session_state: st.session_state['form_name'] = ""
             if 'form_caps' not in st.session_state: st.session_state['form_caps'] = ""
             if 'form_safety_index' not in st.session_state: st.session_state['form_safety_index'] = 0
             
-            default_owner_idx = 0
+            # HANDLE OWNER INDEX (The "Blank Default" Logic)
+            # If we have a specific owner in session state, find their index. 
+            # Otherwise, set index to None (Blank).
+            owner_idx = None
             if 'form_owner' in st.session_state and st.session_state['form_owner'] in ALL_OWNERS:
-                 default_owner_idx = ALL_OWNERS.index(st.session_state['form_owner'])
+                 owner_idx = ALL_OWNERS.index(st.session_state['form_owner'])
             
-            default_house_idx = 0
+            house_idx = None
             if 'form_household' in st.session_state and st.session_state['form_household'] in ALL_HOUSEHOLDS:
-                 default_house_idx = ALL_HOUSEHOLDS.index(st.session_state['form_household'])
+                 house_idx = ALL_HOUSEHOLDS.index(st.session_state['form_household'])
 
             # Inputs
             new_name = st.text_input("Tool Name", key="form_name")
-            new_owner = st.selectbox("Owner", ALL_OWNERS, index=default_owner_idx)
-            new_household = st.selectbox("Location", ALL_HOUSEHOLDS, index=default_house_idx)
+            
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                new_brand = st.text_input("Brand", key="form_brand")
+            with c2:
+                new_model = st.text_input("Model #", key="form_model")
+            with c3:
+                new_power = st.selectbox("Power", ["Manual", "Corded", "Battery", "Gas"], key="form_power")
+
+            c4, c5 = st.columns(2)
+            with c4:
+                # Searchable Owner Box
+                new_owner = st.selectbox("Owner", ALL_OWNERS, index=owner_idx, placeholder="Type to search owner...")
+            with c5:
+                new_household = st.selectbox("Location", ALL_HOUSEHOLDS, index=house_idx, placeholder="Select household...")
+
+            new_bin = st.text_input("Specific Location", placeholder="e.g. Garage - Shelf 2", key="form_bin")
+            
             new_safety = st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], index=st.session_state['form_safety_index'])
             new_caps = st.text_input("Capabilities", key="form_caps")
             
-            # The Save Button
-            if st.form_submit_button("Save Tool", use_container_width=True):
-                import random
-                new_id = f"TOOL_{random.randint(10000,99999)}"
-                dm.con.execute("INSERT INTO tools VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", 
-                    (new_id, new_name, new_owner, new_household, 'Available', None, None, new_caps, new_safety))
-                st.success(f"✅ Saved: {new_name}")
-                st.rerun()
+            # UPDATED BUTTON TEXT
+            if st.form_submit_button("💾 Add to Tool Registry", use_container_width=True):
+                if not new_owner or not new_household:
+                    st.error("⚠️ Please select an Owner and Location before saving.")
+                else:
+                    # UNIQUE ID GENERATION (UUID)
+                    # Takes first 6 chars of a UUID. Collision chance is 1 in billions.
+                    # .upper() makes it look like a serial number: TOOL_4A2B1C
+                    new_id = f"TOOL_{uuid.uuid4().hex[:6].upper()}"
+                    
+                    dm.con.execute("INSERT INTO tools VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+                        (new_id, new_name, new_brand, new_model, new_power, new_owner, new_household, new_bin, 'Available', None, None, new_caps, new_safety))
+                    
+                    st.success(f"✅ Saved: {new_name} (ID: {new_id})")
+                    st.rerun()
