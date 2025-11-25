@@ -12,9 +12,15 @@ def get_ai_advice(user_query, available_tools_df):
         return "⚠️ Error: Gemini API Key missing or invalid."
 
     # Format Inventory
+    # UPDATED: Includes Brand and Model in the context so the Shop Teacher is smarter
     tool_context = ""
     for index, row in available_tools_df.iterrows():
-        tool_context += f"- {row['name']} (Safety: {row['safety_rating']}, Capabilities: {row['capabilities']})\n"
+        # Handle missing columns gracefully if DB schema is old
+        brand = row.get('brand', '')
+        model = row.get('model_no', '')
+        details = f"{brand} {model}".strip()
+        
+        tool_context += f"- {row['name']} [{details}] (Safety: {row['safety_rating']}, Caps: {row['capabilities']})\n"
 
     prompt = f"""
     You are the "Hintze Family Tool Manager." 
@@ -35,7 +41,7 @@ def get_ai_advice(user_query, available_tools_df):
     """
 
     try:
-        # Use a widely available model to prevent 404s
+        # Use a widely available model
         model = genai.GenerativeModel('gemini-2.5-flash') 
         response = model.generate_content(prompt)
         return response.text
@@ -44,13 +50,13 @@ def get_ai_advice(user_query, available_tools_df):
 
 def ai_parse_tool(raw_text):
     """
-    Takes raw text (e.g. Amazon title) and returns a JSON dictionary 
-    with {name, safety, capabilities}.
+    Takes raw text (e.g. Amazon title) and returns a JSON dictionary.
     """
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         model = genai.GenerativeModel('gemini-2.5-flash')
         
+        # UPDATED PROMPT: Now asks for Brand, Model, and Power
         prompt = f"""
         You are an inventory assistant. Analyze this tool description and extract structured data.
         
@@ -58,16 +64,22 @@ def ai_parse_tool(raw_text):
         
         REQUIREMENTS:
         1. Name: Clean, concise tool name (e.g., "Milwaukee M18 Fuel Driver").
-        2. Safety: Strictly choose one: "Open", "Supervised", or "Adult Only".
+        2. Brand: The manufacturer (e.g. DeWalt). If unknown, use "".
+        3. Model: The specific model number (e.g. DCF887). If none, use "".
+        4. Power: "Corded", "Battery", "Gas", or "Manual".
+        5. Safety: Strictly choose one: "Open", "Supervised", or "Adult Only".
            - "Open": Simple hand tools (screwdrivers, hammers).
-           - "Supervised": Complex hand tools or simple power tools (soldering iron, hand drill).
-           - "Adult Only": Dangerous power tools (saws, grinders, nail guns).
-        3. Capabilities: A clean string of 3-5 comma-separated keywords (e.g., "drilling, driving screws").
+           - "Supervised": Complex hand tools or simple power tools.
+           - "Adult Only": Dangerous power tools (saws, grinders).
+        6. Capabilities: A clean string of 3-5 comma-separated keywords.
         
         OUTPUT FORMAT:
         Return ONLY valid JSON. No markdown.
         {{
             "name": "...",
+            "brand": "...",
+            "model_no": "...",
+            "power_source": "...",
             "safety": "...",
             "capabilities": "..."
         }}
@@ -78,4 +90,4 @@ def ai_parse_tool(raw_text):
         return json.loads(clean_text)
         
     except Exception as e:
-        return None
+        return Nonegit add gemini_helper.py app.py
