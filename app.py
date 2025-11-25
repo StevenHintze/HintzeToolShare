@@ -8,7 +8,7 @@ import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.11", page_icon="🛠️")
 
 # Initialize DB
 dm = DataManager()
@@ -32,8 +32,6 @@ except:
 if "user_info" not in st.session_state:
     st.session_state["user_info"] = None
 
-# FIX #1: Logout Handling
-# Only auto-login if we aren't in the middle of logging out
 cookie_email = cookie_manager.get(cookie="hfts_user")
 
 if st.session_state["user_info"] is None and cookie_email:
@@ -60,7 +58,6 @@ def login():
     else:
         st.error("Incorrect Family Password.")
 
-# Login Screen
 if st.session_state["user_info"] is None:
     st.title("🔐 Family Login")
     st.text_input("Email Address", key="email_input")
@@ -82,7 +79,6 @@ st.sidebar.write(f"**House:** {current_user['household']}")
 if st.sidebar.button("Log Out"):
     cookie_manager.delete("hfts_user")
     st.session_state["user_info"] = None
-    # Important: Sleep to give browser time to delete cookie before reload
     time.sleep(1) 
     st.rerun()
 
@@ -102,33 +98,30 @@ with current_tabs[0]:
     with c1:
         query = st.text_input("🔎 Search or Ask...", placeholder="e.g. 'Automotive tools' or 'What has Shawn borrowed?'")
     with c2:
-        # Toggle to force AI search vs simple text match
+        st.write("")
         use_ai = st.toggle("Use AI Search", value=False)
 
     # 2. Filter Logic
-    # Refresh data
     all_tools = dm.con.execute("SELECT * FROM tools").df()
-    
     filtered_df = all_tools
+    
     if query:
         if use_ai:
             with st.spinner("AI is filtering..."):
                 match_ids = ai_filter_inventory(query, all_tools)
                 filtered_df = all_tools[all_tools['id'].isin(match_ids)]
         else:
-            # Standard text search (Name, Brand, Capabilities)
+            # Standard text search
             mask = (
                 all_tools['name'].str.contains(query, case=False, na=False) | 
                 all_tools['brand'].str.contains(query, case=False, na=False) |
-                all_tools['capabilities'].str.contains(search_query, case=False, na=False)
+                all_tools['capabilities'].str.contains(query, case=False, na=False)
             )
             filtered_df = all_tools[mask]
 
-    # 3. Display Inventory (Rich Table)
-    # Add a "Location Info" column that combines Household + Bin
+    # 3. Display Inventory
     filtered_df['Location Info'] = filtered_df['household'] + " (" + filtered_df['bin_location'] + ")"
     
-    # If borrowed, show who has it
     def get_status_display(row):
         if row['status'] == 'Borrowed':
             return f"⛔ With {row['borrower']}"
@@ -146,9 +139,8 @@ with current_tabs[0]:
 
     st.markdown("---")
 
-    # 4. Manual Borrowing (The Transaction)
+    # 4. Manual Borrowing (Transactions)
     st.subheader("⚡ Quick Borrow")
-    # Only show available tools in the dropdown to prevent errors
     available_only = all_tools[all_tools['status'] == 'Available']
     
     if not available_only.empty:
@@ -160,20 +152,16 @@ with current_tabs[0]:
                 days = st.number_input("Days", min_value=1, value=7)
             
             if st.form_submit_button("Confirm Borrow"):
-                # Get Tool Data
                 tool_row = available_only[available_only['name'] == target_tool_name].iloc[0]
                 
-                # Safety Check
                 if check_safety(current_user['role'], tool_row['safety_rating']):
                     dm.borrow_tool(tool_row['id'], current_user['name'], days)
                     st.success(f"✅ You borrowed the {target_tool_name}!")
                     
-                    # --- COURIER LOGIC (The "Favor" Feature) ---
-                    # 1. Where is the tool I just borrowed coming from?
+                    # --- COURIER LOGIC ---
                     pickup_household = tool_row['household']
                     
-                    # 2. Who lives there? (Reverse lookup from OWNER_HOMES)
-                    # We assume if the tool is at "Shawn's House", Shawn lives there.
+                    # Who lives there?
                     resident_name = None
                     for owner, house in OWNER_HOMES.items():
                         if house == pickup_household:
@@ -181,9 +169,7 @@ with current_tabs[0]:
                             break
                     
                     if resident_name:
-                        # 3. Does that resident currently owe any tools?
-                        # Find tools where borrower == resident_name AND status == Borrowed
-                        # AND the tool doesn't belong to them (optional, but good for returns)
+                        # Find tools borrowed by that resident that belong to others
                         courier_candidates = all_tools[
                             (all_tools['borrower'] == resident_name) & 
                             (all_tools['status'] == 'Borrowed')
@@ -191,29 +177,24 @@ with current_tabs[0]:
                         
                         if not courier_candidates.empty:
                             st.info(f"🚛 **Courier Opportunity!**")
-                            st.write(f"Since you are going to **{pickup_household}**, {resident_name} has these items that might need returning:")
+                            st.write(f"Since you are going to **{pickup_household}**, {resident_name} has these items checked out:")
                             for idx, c_row in courier_candidates.iterrows():
                                 st.markdown(f"- **{c_row['name']}** (Owned by {c_row['owner']}) - Due: {c_row['return_date']}")
                             st.caption("Ask them if you can save them a trip and return these!")
                     
-                    time.sleep(5) # Pause to let them read the Courier message
+                    time.sleep(6)
                     st.rerun()
                 else:
                     st.error("🚫 Safety Restriction.")
 
-# TAB 2: My Workbench & Assets
+# TAB 2: My Workbench
 with current_tabs[1]:
     st.header("My Workbench & Assets")
-    
-    # Get Fresh Data
     all_tools = dm.con.execute("SELECT * FROM tools").df()
-    
-    # --- SECTION A: WHAT I OWE (My Loans) ---
     my_loans = all_tools[all_tools['borrower'] == current_user['name']]
     
     st.subheader("🛠️ Tools I have Borrowed")
     if not my_loans.empty:
-        # Calculate Status
         my_loans['Due In'] = (pd.to_datetime(my_loans['return_date']) - pd.Timestamp.now()).dt.days
         def color_status(days):
             if days < 0: return "🔴 Overdue"
@@ -221,19 +202,8 @@ with current_tabs[1]:
             return "🟢 On Track"
         my_loans['Status'] = my_loans['Due In'].apply(color_status)
 
-        # Interactive Return Table
-        loan_editor = st.data_editor(
-            my_loans[['name', 'brand', 'household', 'return_date', 'Status']],
-            column_config={
-                "household": "Return To",
-                "return_date": st.column_config.DatetimeColumn("Due Date", format="D MMM")
-            },
-            disabled=["name", "brand", "household", "Status"],
-            key="loan_editor",
-            num_rows="dynamic" # Hack to allow row selection logic via on_change if needed, or just visuals
-        )
+        st.dataframe(my_loans[['name', 'brand', 'household', 'return_date', 'Status']])
         
-        # We use a Selectbox for explicit action to avoid accidental returns
         tool_to_return = st.selectbox("Select tool to return:", my_loans['name'], key="return_select")
         if st.button("✅ Return Selected Tool"):
             tid = my_loans[my_loans['name'] == tool_to_return].iloc[0]['id']
@@ -241,24 +211,16 @@ with current_tabs[1]:
             st.success(f"Returned {tool_to_return}!")
             st.rerun()
     else:
-        st.info("You don't owe anyone anything. Feels good!")
+        st.info("You don't owe anyone anything.")
 
     st.markdown("---")
-
-    # --- SECTION B: WHO HAS MY STUFF? (Owner View) ---
-    # Tools I own, that are currently borrowed by NOT me
-    my_assets = all_tools[
-        (all_tools['owner'] == current_user['name']) & 
-        (all_tools['status'] == 'Borrowed')
-    ]
     
+    my_assets = all_tools[(all_tools['owner'] == current_user['name']) & (all_tools['status'] == 'Borrowed')]
     st.subheader("👀 Who has my stuff?")
     if not my_assets.empty:
         st.warning(f"You have {len(my_assets)} tools currently loaned out.")
         st.dataframe(my_assets[['name', 'borrower', 'return_date']])
         
-        # Owner Override: "I got it back"
-        st.write("**Owner Override:** Mark item as returned if they forgot.")
         tool_back = st.selectbox("Select tool received:", my_assets['name'], key="owner_return_select")
         if st.button("📥 Mark as Received"):
             tid = my_assets[my_assets['name'] == tool_back].iloc[0]['id']
@@ -268,52 +230,41 @@ with current_tabs[1]:
     else:
         st.success("All your tools are safe at home.")
 
-# TAB 3: Tool Manager (The "Smart Cart")
+# TAB 3: Smart Tool Manager
 with current_tabs[2]:
-    from gemini_helper import get_smart_recommendations
-    
     st.header("🤖 Smart Project Planner")
     
     if "ai_recs" not in st.session_state:
         st.session_state["ai_recs"] = None
 
-    # PHASE 1: Search
     if st.session_state["ai_recs"] is None:
         st.info(f"Planning a project? I'll check {current_user['household']} first, then look for loans.")
         project_query = st.text_area("Describe your project:", placeholder="e.g. I need to sand and stain the deck...")
         
         if st.button("Analyze Needs"):
             if project_query:
-                with st.spinner("Checking your garage and family inventory..."):
-                    # Pass ALL tools (so we know what is borrowed) + User Household
+                with st.spinner("Checking inventory..."):
                     all_tools_df = dm.con.execute("SELECT * FROM tools").df()
                     recs = get_smart_recommendations(project_query, all_tools_df, current_user['household'])
-                    
                     if recs:
                         st.session_state["ai_recs"] = recs
                         st.rerun()
-    
-    # PHASE 2: Results
     else:
         recs = st.session_state["ai_recs"]
-        
         if st.button("← New Search"):
             st.session_state["ai_recs"] = None
             st.rerun()
 
-        # 1. THINGS YOU HAVE (Don't Borrow)
         if recs.get('locate_list'):
-            st.success("✅ **You already own these (Look in your garage):**")
+            st.success("✅ **You already own these:**")
             for item in recs['locate_list']:
-                st.markdown(f"- **{item['tool_name']}** (Location: {item.get('location', 'Unknown')})")
+                st.markdown(f"- **{item['tool_name']}**")
         
-        # 2. THINGS YOU OWN BUT ARE GONE (Alert)
         if recs.get('track_down_list'):
             st.warning("⚠️ **You own these, but they are gone:**")
             for item in recs['track_down_list']:
                 st.markdown(f"- **{item['tool_name']}** is with **{item['held_by']}**")
 
-        # 3. THINGS TO BORROW (The Cart)
         if recs.get('borrow_list'):
             st.info("🛒 **You need to borrow these:**")
             with st.form("smart_borrow"):
@@ -330,19 +281,12 @@ with current_tabs[2]:
                     st.success("Tools borrowed!")
                     st.session_state["ai_recs"] = None
                     st.rerun()
-        else:
-            if not recs.get('locate_list') and not recs.get('track_down_list'):
-                st.write("No specific tools recommended.")
 
 # TAB 4: Admin
 if current_user['role'] == "ADMIN":
     with current_tabs[3]:
         st.header("Add New Tool")
         
-        st.markdown("### 🤖 Step 1: Scan Tool")
-        st.info("Select the owner, paste the description, and click Auto-Fill.")
-        
-        # Layout
         col_ai_1, col_ai_2, col_ai_3 = st.columns([1, 2, 1])
         with col_ai_1:
             quick_owner = st.selectbox("Who bought it?", ALL_OWNERS, index=None, placeholder="Select owner...", key="ai_owner_select")
@@ -354,16 +298,13 @@ if current_user['role'] == "ADMIN":
                     with st.spinner("Analyzing..."):
                         ai_data = ai_parse_tool(raw_input)
                         if ai_data:
-                            # FIX #2: FILL THE NEW FIELDS
                             st.session_state['form_name'] = ai_data.get('name', '')
                             st.session_state['form_brand'] = ai_data.get('brand', '')
                             st.session_state['form_model'] = ai_data.get('model_no', '')
                             st.session_state['form_caps'] = ai_data.get('capabilities', '')
                             
-                            # Smart Power mapping
-                            power_map = ["Manual", "Corded", "Battery", "Gas"]
                             try: 
-                                p_idx = power_map.index(ai_data.get('power_source', 'Manual'))
+                                p_idx = ["Manual", "Corded", "Battery", "Gas"].index(ai_data.get('power_source', 'Manual'))
                                 st.session_state['form_power_idx'] = p_idx
                             except: 
                                 st.session_state['form_power_idx'] = 0
@@ -387,7 +328,6 @@ if current_user['role'] == "ADMIN":
         st.markdown("### 📝 Step 2: Review & Save")
         
         with st.form("add_tool"):
-            # Init Session State
             if 'form_name' not in st.session_state: st.session_state['form_name'] = ""
             if 'form_brand' not in st.session_state: st.session_state['form_brand'] = ""
             if 'form_model' not in st.session_state: st.session_state['form_model'] = ""
@@ -403,7 +343,6 @@ if current_user['role'] == "ADMIN":
             if 'form_household' in st.session_state and st.session_state['form_household'] in ALL_HOUSEHOLDS:
                  house_idx = ALL_HOUSEHOLDS.index(st.session_state['form_household'])
 
-            # Form Layout
             new_name = st.text_input("Tool Name", key="form_name")
             
             c1, c2, c3 = st.columns(3)
@@ -421,7 +360,6 @@ if current_user['role'] == "ADMIN":
                 new_household = st.selectbox("Location", ALL_HOUSEHOLDS, index=house_idx, placeholder="Select household...")
 
             new_bin = st.text_input("Specific Location", placeholder="e.g. Garage - Shelf 2", key="form_bin")
-            
             new_safety = st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], index=st.session_state['form_safety_index'])
             new_caps = st.text_input("Capabilities", key="form_caps")
             
