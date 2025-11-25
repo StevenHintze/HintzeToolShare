@@ -125,33 +125,68 @@ if current_user['role'] == "ADMIN":
     with current_tabs[3]:
         st.header("Add New Tool")
         
-        col_ai_1, col_ai_2, col_ai_3 = st.columns([1, 2, 1])
-        with col_ai_1:
-            quick_owner = st.selectbox("Who bought it?", ALL_OWNERS, key="ai_owner_select")
-        with col_ai_2:
-            raw_input = st.text_input("Paste Description", key="ai_input", label_visibility="collapsed")
-        with col_ai_3:
-            if st.button("✨ Auto-Fill", use_container_width=True):
-                if raw_input:
-                    with st.spinner("Analyzing..."):
-                        ai_data = ai_parse_tool(raw_input)
-                        if ai_data:
-                            st.session_state['form_name'] = ai_data['name']
-                            st.session_state['form_caps'] = ai_data['capabilities']
-                            try:
-                                st.session_state['form_safety_index'] = ["Open", "Supervised", "Adult Only"].index(ai_data['safety'])
-                            except:
-                                st.session_state['form_safety_index'] = 0
-                            
-                            st.session_state['form_owner'] = quick_owner
-                            st.session_state['form_household'] = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0])
-                            st.success("Parsed!")
+        # --- SECTION 1: AI HELPER ---
+        st.markdown("### 🤖 Step 1: Scan Tool")
+        st.info("Select the owner, paste the description, and click Auto-Fill.")
+        
+        # Vertical layout for Mobile friendliness
+        quick_owner = st.selectbox("Who bought it?", ALL_OWNERS, key="ai_owner_select")
+        raw_input = st.text_input("Paste Description (Amazon title, etc.)", key="ai_input")
+        
+        if st.button("✨ Auto-Fill", use_container_width=True):
+            if raw_input:
+                with st.spinner("Analyzing..."):
+                    ai_data = ai_parse_tool(raw_input)
+                    if ai_data:
+                        st.session_state['form_name'] = ai_data['name']
+                        st.session_state['form_caps'] = ai_data['capabilities']
+                        try:
+                            st.session_state['form_safety_index'] = ["Open", "Supervised", "Adult Only"].index(ai_data['safety'])
+                        except:
+                            st.session_state['form_safety_index'] = 0
+                        
+                        st.session_state['form_owner'] = quick_owner
+                        st.session_state['form_household'] = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0])
+                        st.success("✅ Parsed! Check Step 2 below.")
+            else:
+                st.error("Please paste a description first.")
 
+        st.markdown("---")
+
+        # --- SECTION 2: THE DATABASE FORM ---
+        st.markdown("### 📝 Step 2: Review & Save")
+        
         with st.form("add_tool"):
+            # Ensure state exists
             if 'form_name' not in st.session_state: st.session_state['form_name'] = ""
             if 'form_caps' not in st.session_state: st.session_state['form_caps'] = ""
             if 'form_safety_index' not in st.session_state: st.session_state['form_safety_index'] = 0
             
+            # Smart Defaults
             default_owner_idx = 0
             if 'form_owner' in st.session_state and st.session_state['form_owner'] in ALL_OWNERS:
                  default_owner_idx = ALL_OWNERS.index(st.session_state['form_owner'])
+            
+            default_house_idx = 0
+            if 'form_household' in st.session_state and st.session_state['form_household'] in ALL_HOUSEHOLDS:
+                 default_house_idx = ALL_HOUSEHOLDS.index(st.session_state['form_household'])
+
+            # The Inputs
+            new_name = st.text_input("Tool Name", key="form_name")
+            new_owner = st.selectbox("Owner", ALL_OWNERS, index=default_owner_idx)
+            new_household = st.selectbox("Location", ALL_HOUSEHOLDS, index=default_house_idx)
+            new_safety = st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], index=st.session_state['form_safety_index'])
+            new_caps = st.text_input("Capabilities", key="form_caps")
+            
+            # The Save Button
+            if st.form_submit_button("💾 Add to Database", use_container_width=True):
+                import random
+                new_id = f"TOOL_{random.randint(10000,99999)}"
+                dm.con.execute("INSERT INTO tools VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+                    (new_id, new_name, new_owner, new_household, 'Available', None, None, new_caps, new_safety))
+                st.success(f"✅ Saved: {new_name}")
+                
+                # Clear form
+                st.session_state['form_name'] = ""
+                st.session_state['form_caps'] = ""
+                st.rerun()
