@@ -2,7 +2,7 @@ import streamlit as st
 import extra_streamlit_components as stx
 from data_manager import DataManager
 from tools_registry import check_safety 
-from gemini_helper import ai_parse_tool 
+from gemini_helper import ai_parse_tool, get_ai_advice, get_smart_recommendations, ai_filter_inventory
 import time
 import datetime
 import uuid
@@ -93,32 +93,113 @@ if current_user['role'] == "ADMIN":
 
 current_tabs = st.tabs(tabs)
 
-# TAB 1: Borrow
+# TAB 1: Inventory & Courier
 with current_tabs[0]:
-    st.header("Find & Borrow")
-    search_query = st.text_input("🔍 I need to...", placeholder="e.g. fix a flat tire, drill concrete")
+    st.header("Global Inventory")
     
-    available_tools = dm.get_available_tools()
-    if search_query:
-        available_tools = available_tools[available_tools['capabilities'].str.contains(search_query, case=False, na=False)]
-    
-    st.dataframe(available_tools[['name', 'brand', 'model_no', 'bin_location', 'household', 'safety_rating', 'capabilities']])
+    # 1. Search Interface
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        query = st.text_input("🔎 Search or Ask...", placeholder="e.g. 'Automotive tools' or 'What has Shawn borrowed?'")
+    with c2:
+        # Toggle to force AI search vs simple text match
+        use_ai = st.toggle("Use AI Search", value=False)
 
-    st.subheader("Checkout")
-    if not available_tools.empty:
-        with st.form("borrow_form"):
-            selected_tool_name = st.selectbox("Select Tool", available_tools['name'])
-            days_needed = st.number_input("Days Needed", min_value=1, value=3)
-            if st.form_submit_button("Mark it Borrowed"):
-                tool_row = available_tools[available_tools['name'] == selected_tool_name].iloc[0]
+    # 2. Filter Logic
+    # Refresh data
+    all_tools = dm.con.execute("SELECT * FROM tools").df()
+    
+    filtered_df = all_tools
+    if query:
+        if use_ai:
+            with st.spinner("AI is filtering..."):
+                match_ids = ai_filter_inventory(query, all_tools)
+                filtered_df = all_tools[all_tools['id'].isin(match_ids)]
+        else:
+            # Standard text search (Name, Brand, Capabilities)
+            mask = (
+                all_tools['name'].str.contains(query, case=False, na=False) | 
+                all_tools['brand'].str.contains(query, case=False, na=False) |
+                all_tools['capabilities'].str.contains(search_query, case=False, na=False)
+            )
+            filtered_df = all_tools[mask]
+
+    # 3. Display Inventory (Rich Table)
+    # Add a "Location Info" column that combines Household + Bin
+    filtered_df['Location Info'] = filtered_df['household'] + " (" + filtered_df['bin_location'] + ")"
+    
+    # If borrowed, show who has it
+    def get_status_display(row):
+        if row['status'] == 'Borrowed':
+            return f"⛔ With {row['borrower']}"
+        return "✅ Available"
+    
+    filtered_df['Display Status'] = filtered_df.apply(get_status_display, axis=1)
+
+    st.dataframe(
+        filtered_df[['name', 'brand', 'Display Status', 'Location Info', 'return_date']],
+        column_config={
+            "return_date": st.column_config.DatetimeColumn("Due Back", format="D MMM")
+        },
+        use_container_width=True
+    )
+
+    st.markdown("---")
+
+    # 4. Manual Borrowing (The Transaction)
+    st.subheader("⚡ Quick Borrow")
+    # Only show available tools in the dropdown to prevent errors
+    available_only = all_tools[all_tools['status'] == 'Available']
+    
+    if not available_only.empty:
+        with st.form("manual_borrow"):
+            col_b1, col_b2 = st.columns([3, 1])
+            with col_b1:
+                target_tool_name = st.selectbox("Select Tool", available_only['name'])
+            with col_b2:
+                days = st.number_input("Days", min_value=1, value=7)
+            
+            if st.form_submit_button("Confirm Borrow"):
+                # Get Tool Data
+                tool_row = available_only[available_only['name'] == target_tool_name].iloc[0]
+                
+                # Safety Check
                 if check_safety(current_user['role'], tool_row['safety_rating']):
-                    dm.borrow_tool(tool_row['id'], current_user['name'], days_needed)
-                    st.success(f"✅ Borrowed {selected_tool_name}!")
+                    dm.borrow_tool(tool_row['id'], current_user['name'], days)
+                    st.success(f"✅ You borrowed the {target_tool_name}!")
+                    
+                    # --- COURIER LOGIC (The "Favor" Feature) ---
+                    # 1. Where is the tool I just borrowed coming from?
+                    pickup_household = tool_row['household']
+                    
+                    # 2. Who lives there? (Reverse lookup from OWNER_HOMES)
+                    # We assume if the tool is at "Shawn's House", Shawn lives there.
+                    resident_name = None
+                    for owner, house in OWNER_HOMES.items():
+                        if house == pickup_household:
+                            resident_name = owner
+                            break
+                    
+                    if resident_name:
+                        # 3. Does that resident currently owe any tools?
+                        # Find tools where borrower == resident_name AND status == Borrowed
+                        # AND the tool doesn't belong to them (optional, but good for returns)
+                        courier_candidates = all_tools[
+                            (all_tools['borrower'] == resident_name) & 
+                            (all_tools['status'] == 'Borrowed')
+                        ]
+                        
+                        if not courier_candidates.empty:
+                            st.info(f"🚛 **Courier Opportunity!**")
+                            st.write(f"Since you are going to **{pickup_household}**, {resident_name} has these items that might need returning:")
+                            for idx, c_row in courier_candidates.iterrows():
+                                st.markdown(f"- **{c_row['name']}** (Owned by {c_row['owner']}) - Due: {c_row['return_date']}")
+                            st.caption("Ask them if you can save them a trip and return these!")
+                    
+                    time.sleep(5) # Pause to let them read the Courier message
                     st.rerun()
                 else:
-                    st.error(f"🚫 Safety Restriction: {tool_row['safety_rating']}")
-    else:
-        st.info("No matching tools found.")
+                    st.error("🚫 Safety Restriction.")
 
 # TAB 2: My Workbench & Assets
 with current_tabs[1]:

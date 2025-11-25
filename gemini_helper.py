@@ -118,3 +118,45 @@ def ai_parse_tool(raw_text):
         
     except Exception as e:
         return None
+
+def ai_filter_inventory(user_query, inventory_df):
+    """
+    Filters the inventory based on natural language (e.g. "automotive tools").
+    Returns a list of matching Tool IDs.
+    """
+    try:
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    except:
+        return []
+
+    # Simplify context to save tokens
+    context = ""
+    for index, row in inventory_df.iterrows():
+        status_str = f"Borrowed by {row['borrower']}" if row['status'] == 'Borrowed' else "Available"
+        context += f"ID: {row['id']} | Name: {row['name']} | Cap: {row['capabilities']} | Status: {status_str}\n"
+
+    prompt = f"""
+    You are an Inventory Search Engine.
+    
+    QUERY: "{user_query}"
+    
+    INVENTORY:
+    {context}
+    
+    TASK:
+    Return a JSON list of Tool IDs that match the query.
+    - If user asks "What has Shawn borrowed?", find items with Status "Borrowed by Shawn".
+    - If user asks "Automotive", find items with capabilities related to cars/trucks.
+    - If user asks "Battery powered", find items with power_source='Battery'.
+    
+    OUTPUT JSON:
+    {{ "match_ids": ["ID1", "ID2"] }}
+    """
+    
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = model.generate_content(prompt)
+        clean = response.text.replace("```json", "").replace("```", "").strip()
+        return json.loads(clean).get("match_ids", [])
+    except:
+        return []        
