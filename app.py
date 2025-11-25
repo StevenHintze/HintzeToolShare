@@ -8,18 +8,31 @@ st.set_page_config(page_title="HFTS", page_icon="🛠️")
 
 # Initialize DB
 dm = DataManager()
-# Seed with empty lists because the Admin Script handles the data now
 dm.seed_data([], []) 
 
 # --- DYNAMIC DATA LOADING ---
-family_df = dm.get_family_members()
-OWNER_HOMES = dict(zip(family_df['name'], family_df['household']))
-ALL_OWNERS = list(OWNER_HOMES.keys())
-ALL_HOUSEHOLDS = list(set(OWNER_HOMES.values()))
+try:
+    family_df = dm.get_family_members()
+    OWNER_HOMES = dict(zip(family_df['name'], family_df['household']))
+    ALL_OWNERS = list(OWNER_HOMES.keys())
+    ALL_HOUSEHOLDS = list(set(OWNER_HOMES.values()))
+except:
+    OWNER_HOMES = {}
+    ALL_OWNERS = ["Admin"]
+    ALL_HOUSEHOLDS = ["Main House"]
 
-# --- AUTHENTICATION LOGIC ---
+# --- AUTHENTICATION & PERSISTENCE ---
 if "user_info" not in st.session_state:
     st.session_state["user_info"] = None
+
+# 1. AUTO-LOGIN CHECK (Runs on every refresh)
+# If not logged in, check if the URL has a valid email saved
+if st.session_state["user_info"] is None:
+    if "user_email" in st.query_params:
+        saved_email = st.query_params["user_email"]
+        user = dm.get_user_by_email(saved_email)
+        if user:
+            st.session_state["user_info"] = user
 
 def login():
     email = st.session_state.get("email_input", "").strip().lower()
@@ -29,6 +42,8 @@ def login():
         user = dm.get_user_by_email(email)
         if user:
             st.session_state["user_info"] = user
+            # SAVE TO URL (Persist login)
+            st.query_params["user_email"] = email
             st.success(f"Welcome back, {user['name']}!")
             time.sleep(1)
             st.rerun()
@@ -37,6 +52,7 @@ def login():
     else:
         st.error("Incorrect Family Password.")
 
+# Show Login Screen if still not logged in
 if st.session_state["user_info"] is None:
     st.title("🔐 Family Login")
     st.text_input("Email Address", key="email_input")
@@ -57,6 +73,7 @@ st.sidebar.write(f"**House:** {current_user['household']}")
 
 if st.sidebar.button("Log Out"):
     st.session_state["user_info"] = None
+    st.query_params.clear() # Clear URL so you don't auto-login again
     st.rerun()
 
 # Main Interface
@@ -129,7 +146,6 @@ if current_user['role'] == "ADMIN":
         st.markdown("### 🤖 Step 1: Scan Tool")
         st.info("Select the owner, paste the description, and click Auto-Fill.")
         
-        # Vertical layout for Mobile friendliness
         quick_owner = st.selectbox("Who bought it?", ALL_OWNERS, key="ai_owner_select")
         raw_input = st.text_input("Paste Description (Amazon title, etc.)", key="ai_input")
         
@@ -157,7 +173,6 @@ if current_user['role'] == "ADMIN":
         st.markdown("### 📝 Step 2: Review & Save")
         
         with st.form("add_tool"):
-            # Ensure state exists
             if 'form_name' not in st.session_state: st.session_state['form_name'] = ""
             if 'form_caps' not in st.session_state: st.session_state['form_caps'] = ""
             if 'form_safety_index' not in st.session_state: st.session_state['form_safety_index'] = 0
@@ -171,20 +186,18 @@ if current_user['role'] == "ADMIN":
             if 'form_household' in st.session_state and st.session_state['form_household'] in ALL_HOUSEHOLDS:
                  default_house_idx = ALL_HOUSEHOLDS.index(st.session_state['form_household'])
 
-            # The Inputs
+            # Inputs
             new_name = st.text_input("Tool Name", key="form_name")
             new_owner = st.selectbox("Owner", ALL_OWNERS, index=default_owner_idx)
             new_household = st.selectbox("Location", ALL_HOUSEHOLDS, index=default_house_idx)
             new_safety = st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], index=st.session_state['form_safety_index'])
             new_caps = st.text_input("Capabilities", key="form_caps")
             
-            # The Save Button
+            # The Save Button (Fixed: Removed clear-lines to prevent crash)
             if st.form_submit_button("💾 Add to Database", use_container_width=True):
                 import random
                 new_id = f"TOOL_{random.randint(10000,99999)}"
                 dm.con.execute("INSERT INTO tools VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", 
                     (new_id, new_name, new_owner, new_household, 'Available', None, None, new_caps, new_safety))
                 st.success(f"✅ Saved: {new_name}")
-                
-                # Clear form
                 st.rerun()
