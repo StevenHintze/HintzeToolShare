@@ -134,17 +134,101 @@ with current_tabs[1]:
     else:
         st.success("No tools are currently borrowed.")
 
-# TAB 3: Tool Manager
+# TAB 3: Tool Manager (The "Smart Cart")
 with current_tabs[2]:
-    from gemini_helper import get_ai_advice 
-    st.header("Ask the Tool Manager")
-    project_query = st.text_area("What project are you planning?", placeholder="e.g., I need to build a planter box...")
+    from gemini_helper import get_smart_recommendations
     
-    if st.button("Get Advice"):
-        if project_query:
-            with st.spinner("Consulting the inventory..."):
-                advice = get_ai_advice(project_query, dm.get_available_tools())
-                st.markdown(advice)
+    st.header("🤖 Smart Borrowing Assistant")
+    
+    # We use Session State to "remember" the recommendations after you click the button
+    if "ai_recs" not in st.session_state:
+        st.session_state["ai_recs"] = None
+
+    # PHASE 1: The Inquiry
+    # If we haven't recommended anything yet, show the search box
+    if st.session_state["ai_recs"] is None:
+        st.info("Tell me what you're building. I'll pick the best tools and group them by household to save you a trip.")
+        project_query = st.text_area("Project Description", placeholder="e.g. I need to hang some heavy shelves in the garage...")
+        
+        if st.button("Analyze & Recommend Tools"):
+            if project_query:
+                with st.spinner("Checking inventory and optimizing logistics..."):
+                    # 1. Get Available Tools only
+                    available_tools = dm.get_available_tools()
+                    # 2. Ask AI
+                    recs = get_smart_recommendations(project_query, available_tools)
+                    if recs:
+                        st.session_state["ai_recs"] = recs
+                        st.rerun() # Reload to show Phase 2
+            else:
+                st.error("Please describe your project.")
+
+    # PHASE 2: The Selection & Rationale
+    else:
+        recs = st.session_state["ai_recs"]
+        
+        # A. The "Reset" Button (To go back)
+        if st.button("← Start Over / New Search"):
+            st.session_state["ai_recs"] = None
+            st.rerun()
+
+        st.markdown("### 🛒 Recommended Cart")
+        
+        # B. The "Rationale" (Progressive Disclosure - Hidden by default or below)
+        # The user asked for this below, but HCD best practice is to show the "Why" 
+        # in a collapsible way so it doesn't clutter the action.
+        with st.expander("💡 View Logistics & Rationale (Click to Open)", expanded=False):
+            st.markdown(f"**Strategy:** {recs['rationale']}")
+
+        # C. The Borrowing Form
+        with st.form("smart_borrow_form"):
+            st.write("Select the tools you want to confirm:")
+            
+            # Identify the tools from the AI's list
+            tools_to_borrow = []
+            available_tools = dm.get_available_tools()
+            
+            # Dynamic Checkboxes based on AI Recommendations
+            selected_ids = []
+            for item in recs['recommended_tools']:
+                # Find the full tool details in our dataframe
+                tool_match = available_tools[available_tools['id'] == item['tool_id']]
+                
+                if not tool_match.empty:
+                    t = tool_match.iloc[0]
+                    # Create a friendly label
+                    label = f"**{t['name']}** ({t['brand']}) - 📍 *{t['household']}*"
+                    help_text = f"AI Reason: {item['reason']}"
+                    
+                    # Pre-select by default (True)
+                    if st.checkbox(label, value=True, help=help_text):
+                        selected_ids.append(t['id'])
+            
+            st.markdown("---")
+            days_needed = st.number_input("Return in (days):", min_value=1, value=7)
+            
+            if st.form_submit_button("✅ Confirm Borrowing"):
+                if not selected_ids:
+                    st.error("No tools selected.")
+                else:
+                    # Process Loop
+                    success_list = []
+                    for tid in selected_ids:
+                        # Verify safety again just in case
+                        tool_safety = available_tools.loc[available_tools['id'] == tid, 'safety_rating'].iloc[0]
+                        tool_name = available_tools.loc[available_tools['id'] == tid, 'name'].iloc[0]
+                        
+                        if check_safety(current_user['role'], tool_safety):
+                            dm.borrow_tool(tid, current_user['name'], days_needed)
+                            success_list.append(tool_name)
+                        else:
+                            st.error(f"🚫 Skipped {tool_name} (Safety Restriction)")
+                    
+                    if success_list:
+                        st.success(f"Successfully borrowed: {', '.join(success_list)}")
+                        st.session_state["ai_recs"] = None # Reset state
+                        time.sleep(2)
+                        st.rerun()
 
 # TAB 4: Admin
 if current_user['role'] == "ADMIN":
