@@ -119,116 +119,138 @@ with current_tabs[0]:
     else:
         st.info("No matching tools found.")
 
-# TAB 2: Return
+# TAB 2: My Workbench & Assets
 with current_tabs[1]:
-    st.header("Return Tools")
-    borrowed_tools = dm.get_borrowed_tools()
-    if not borrowed_tools.empty:
-        st.dataframe(borrowed_tools[['name', 'borrower', 'return_date']])
-        tool_to_return = st.selectbox("Select Tool", borrowed_tools['name'])
-        if st.button("Mark it Returned"):
-            tool_id = borrowed_tools.loc[borrowed_tools['name'] == tool_to_return, 'id'].iloc[0]
-            dm.return_tool(tool_id)
-            st.success("✅ Returned!")
+    st.header("My Workbench & Assets")
+    
+    # Get Fresh Data
+    all_tools = dm.con.execute("SELECT * FROM tools").df()
+    
+    # --- SECTION A: WHAT I OWE (My Loans) ---
+    my_loans = all_tools[all_tools['borrower'] == current_user['name']]
+    
+    st.subheader("🛠️ Tools I have Borrowed")
+    if not my_loans.empty:
+        # Calculate Status
+        my_loans['Due In'] = (pd.to_datetime(my_loans['return_date']) - pd.Timestamp.now()).dt.days
+        def color_status(days):
+            if days < 0: return "🔴 Overdue"
+            if days <= 2: return "🟠 Due Soon"
+            return "🟢 On Track"
+        my_loans['Status'] = my_loans['Due In'].apply(color_status)
+
+        # Interactive Return Table
+        loan_editor = st.data_editor(
+            my_loans[['name', 'brand', 'household', 'return_date', 'Status']],
+            column_config={
+                "household": "Return To",
+                "return_date": st.column_config.DatetimeColumn("Due Date", format="D MMM")
+            },
+            disabled=["name", "brand", "household", "Status"],
+            key="loan_editor",
+            num_rows="dynamic" # Hack to allow row selection logic via on_change if needed, or just visuals
+        )
+        
+        # We use a Selectbox for explicit action to avoid accidental returns
+        tool_to_return = st.selectbox("Select tool to return:", my_loans['name'], key="return_select")
+        if st.button("✅ Return Selected Tool"):
+            tid = my_loans[my_loans['name'] == tool_to_return].iloc[0]['id']
+            dm.return_tool(tid)
+            st.success(f"Returned {tool_to_return}!")
             st.rerun()
     else:
-        st.success("No tools are currently borrowed.")
+        st.info("You don't owe anyone anything. Feels good!")
+
+    st.markdown("---")
+
+    # --- SECTION B: WHO HAS MY STUFF? (Owner View) ---
+    # Tools I own, that are currently borrowed by NOT me
+    my_assets = all_tools[
+        (all_tools['owner'] == current_user['name']) & 
+        (all_tools['status'] == 'Borrowed')
+    ]
+    
+    st.subheader("👀 Who has my stuff?")
+    if not my_assets.empty:
+        st.warning(f"You have {len(my_assets)} tools currently loaned out.")
+        st.dataframe(my_assets[['name', 'borrower', 'return_date']])
+        
+        # Owner Override: "I got it back"
+        st.write("**Owner Override:** Mark item as returned if they forgot.")
+        tool_back = st.selectbox("Select tool received:", my_assets['name'], key="owner_return_select")
+        if st.button("📥 Mark as Received"):
+            tid = my_assets[my_assets['name'] == tool_back].iloc[0]['id']
+            dm.return_tool(tid)
+            st.success(f"Marked {tool_back} as returned.")
+            st.rerun()
+    else:
+        st.success("All your tools are safe at home.")
 
 # TAB 3: Tool Manager (The "Smart Cart")
 with current_tabs[2]:
     from gemini_helper import get_smart_recommendations
     
-    st.header("🤖 Smart Borrowing Assistant")
+    st.header("🤖 Smart Project Planner")
     
-    # We use Session State to "remember" the recommendations after you click the button
     if "ai_recs" not in st.session_state:
         st.session_state["ai_recs"] = None
 
-    # PHASE 1: The Inquiry
-    # If we haven't recommended anything yet, show the search box
+    # PHASE 1: Search
     if st.session_state["ai_recs"] is None:
-        st.info("Tell me what you're building. I'll pick the best tools and group them by household to save you a trip.")
-        project_query = st.text_area("Project Description", placeholder="e.g. I need to hang some heavy shelves in the garage...")
+        st.info(f"Planning a project? I'll check {current_user['household']} first, then look for loans.")
+        project_query = st.text_area("Describe your project:", placeholder="e.g. I need to sand and stain the deck...")
         
-        if st.button("Analyze & Recommend Tools"):
+        if st.button("Analyze Needs"):
             if project_query:
-                with st.spinner("Checking inventory and optimizing logistics..."):
-                    # 1. Get Available Tools only
-                    available_tools = dm.get_available_tools()
-                    # 2. Ask AI
-                    recs = get_smart_recommendations(project_query, available_tools)
+                with st.spinner("Checking your garage and family inventory..."):
+                    # Pass ALL tools (so we know what is borrowed) + User Household
+                    all_tools_df = dm.con.execute("SELECT * FROM tools").df()
+                    recs = get_smart_recommendations(project_query, all_tools_df, current_user['household'])
+                    
                     if recs:
                         st.session_state["ai_recs"] = recs
-                        st.rerun() # Reload to show Phase 2
-            else:
-                st.error("Please describe your project.")
-
-    # PHASE 2: The Selection & Rationale
+                        st.rerun()
+    
+    # PHASE 2: Results
     else:
         recs = st.session_state["ai_recs"]
         
-        # A. The "Reset" Button (To go back)
-        if st.button("← Start Over / New Search"):
+        if st.button("← New Search"):
             st.session_state["ai_recs"] = None
             st.rerun()
 
-        st.markdown("### 🛒 Recommended Cart")
+        # 1. THINGS YOU HAVE (Don't Borrow)
+        if recs.get('locate_list'):
+            st.success("✅ **You already own these (Look in your garage):**")
+            for item in recs['locate_list']:
+                st.markdown(f"- **{item['tool_name']}** (Location: {item.get('location', 'Unknown')})")
         
-        # B. The "Rationale" (Progressive Disclosure - Hidden by default or below)
-        # The user asked for this below, but HCD best practice is to show the "Why" 
-        # in a collapsible way so it doesn't clutter the action.
-        with st.expander("💡 View Logistics & Rationale (Click to Open)", expanded=False):
-            st.markdown(f"**Strategy:** {recs['rationale']}")
+        # 2. THINGS YOU OWN BUT ARE GONE (Alert)
+        if recs.get('track_down_list'):
+            st.warning("⚠️ **You own these, but they are gone:**")
+            for item in recs['track_down_list']:
+                st.markdown(f"- **{item['tool_name']}** is with **{item['held_by']}**")
 
-        # C. The Borrowing Form
-        with st.form("smart_borrow_form"):
-            st.write("Select the tools you want to confirm:")
-            
-            # Identify the tools from the AI's list
-            tools_to_borrow = []
-            available_tools = dm.get_available_tools()
-            
-            # Dynamic Checkboxes based on AI Recommendations
-            selected_ids = []
-            for item in recs['recommended_tools']:
-                # Find the full tool details in our dataframe
-                tool_match = available_tools[available_tools['id'] == item['tool_id']]
+        # 3. THINGS TO BORROW (The Cart)
+        if recs.get('borrow_list'):
+            st.info("🛒 **You need to borrow these:**")
+            with st.form("smart_borrow"):
+                selected_ids = []
+                for item in recs['borrow_list']:
+                    label = f"**{item['name']}** from {item['household']}"
+                    if st.checkbox(label, value=True, help=item['reason']):
+                        selected_ids.append(item['tool_id'])
                 
-                if not tool_match.empty:
-                    t = tool_match.iloc[0]
-                    # Create a friendly label
-                    label = f"**{t['name']}** ({t['brand']}) - 📍 *{t['household']}*"
-                    help_text = f"AI Reason: {item['reason']}"
-                    
-                    # Pre-select by default (True)
-                    if st.checkbox(label, value=True, help=help_text):
-                        selected_ids.append(t['id'])
-            
-            st.markdown("---")
-            days_needed = st.number_input("Return in (days):", min_value=1, value=7)
-            
-            if st.form_submit_button("✅ Confirm Borrowing"):
-                if not selected_ids:
-                    st.error("No tools selected.")
-                else:
-                    # Process Loop
-                    success_list = []
+                days = st.number_input("Days needed:", min_value=1, value=7)
+                if st.form_submit_button("Confirm Borrow Request"):
                     for tid in selected_ids:
-                        # Verify safety again just in case
-                        tool_safety = available_tools.loc[available_tools['id'] == tid, 'safety_rating'].iloc[0]
-                        tool_name = available_tools.loc[available_tools['id'] == tid, 'name'].iloc[0]
-                        
-                        if check_safety(current_user['role'], tool_safety):
-                            dm.borrow_tool(tid, current_user['name'], days_needed)
-                            success_list.append(tool_name)
-                        else:
-                            st.error(f"🚫 Skipped {tool_name} (Safety Restriction)")
-                    
-                    if success_list:
-                        st.success(f"Successfully borrowed: {', '.join(success_list)}")
-                        st.session_state["ai_recs"] = None # Reset state
-                        time.sleep(2)
-                        st.rerun()
+                        dm.borrow_tool(tid, current_user['name'], days)
+                    st.success("Tools borrowed!")
+                    st.session_state["ai_recs"] = None
+                    st.rerun()
+        else:
+            if not recs.get('locate_list') and not recs.get('track_down_list'):
+                st.write("No specific tools recommended.")
 
 # TAB 4: Admin
 if current_user['role'] == "ADMIN":

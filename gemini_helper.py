@@ -2,9 +2,9 @@ import google.generativeai as genai
 import streamlit as st
 import json
 
-def get_smart_recommendations(user_query, available_tools_df):
+def get_smart_recommendations(user_query, inventory_df, user_household):
     """
-    Analyzes project and returns structured JSON with specific tool IDs to borrow.
+    Analyzes project and returns structured JSON with 3 categories of tools.
     """
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
@@ -13,44 +13,58 @@ def get_smart_recommendations(user_query, available_tools_df):
 
     # 1. Prepare Inventory Context
     inventory_list = []
-    for index, row in available_tools_df.iterrows():
-        # Use .get() for safety in case a column is empty or missing
+    for index, row in inventory_df.iterrows():
+        # We need to know WHO has it if it's borrowed
+        status_detail = "Available"
+        if row['status'] == 'Borrowed':
+            status_detail = f"Borrowed by {row['borrower']}"
+
         inventory_list.append({
-            "id": row.get('id', 'Unknown'),
-            "name": row.get('name', 'Unknown Tool'),
-            "brand": row.get('brand', ''),
-            "model": row.get('model_no', ''),
-            "household": row.get('household', 'Unknown'),
-            "specs": row.get('capabilities', ''),
-            "safety": row.get('safety_rating', 'Open')
+            "id": row['id'],
+            "name": row['name'],
+            "brand": row['brand'],
+            "household": row['household'],
+            "status": status_detail, # Critical for the "Alert" logic
+            "specs": row['capabilities'],
+            "safety": row['safety_rating']
         })
     
     inventory_json = json.dumps(inventory_list)
 
-    # 2. The "Logistics Expert" Prompt
+    # 2. The "Context-Aware" Prompt
     prompt = f"""
-    You are the Hintze Family Tool Manager and Logistics Expert.
+    You are the Hintze Family Tool Manager.
     
     USER PROJECT: "{user_query}"
+    USER'S HOUSEHOLD: "{user_household}"
     
     YOUR TASK:
-    1. Select the specific tools needed from the INVENTORY below.
-    2. OPTIMIZATION RULES:
-       - If multiple similar tools exist (e.g. 3 drills), pick the highest quality/most capable one.
-       - If tools are equal quality, prioritize picking tools from the SAME HOUSEHOLD to save the user driving time.
-       - Do not recommend tools we don't have.
+    Identify the best tools for the job and categorize them based on the user's location.
+    
+    CATEGORIES:
+    1. "locate": Tools the user OWNS (same household) that are Available.
+    2. "track_down": Tools the user OWNS but are currently BORROWED by someone else.
+    3. "borrow": Tools the user DOES NOT OWN (different household) that they need to borrow.
+    
+    OPTIMIZATION RULES:
+    - Prefer "locate" tools first (why drive if you have it?).
+    - If a tool is in "track_down", do NOT tell them to borrow another one unless necessary. Just inform them who has theirs.
+    - For "borrow" items, group by household to minimize driving.
     
     INVENTORY JSON:
     {inventory_json}
     
-    OUTPUT FORMAT:
-    Return ONLY valid JSON (no markdown). Structure:
+    OUTPUT FORMAT (JSON ONLY):
     {{
-        "rationale": "Brief explanation of why you chose these tools and this household strategy.",
-        "recommended_tools": [
+        "rationale": "Brief strategy explanation.",
+        "locate_list": [ {{"tool_name": "...", "location": "Bin/Shelf..."}} ],
+        "track_down_list": [ {{"tool_name": "...", "held_by": "Name of borrower"}} ],
+        "borrow_list": [
             {{
-                "tool_id": "Exact ID from inventory",
-                "reason": "Why this specific tool?"
+                "tool_id": "ID",
+                "name": "...",
+                "household": "...",
+                "reason": "..."
             }}
         ]
     }}
@@ -62,7 +76,6 @@ def get_smart_recommendations(user_query, available_tools_df):
         clean_text = response.text.replace("```json", "").replace("```", "").strip()
         return json.loads(clean_text)
     except Exception as e:
-        st.error(f"AI Logic Error: {e}")
         return None
 
 def ai_parse_tool(raw_text):
