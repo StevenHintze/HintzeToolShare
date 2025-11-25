@@ -6,6 +6,7 @@ from gemini_helper import ai_parse_tool
 import time
 import datetime
 import uuid
+import pandas as pd
 
 st.set_page_config(page_title="HFTS", page_icon="🛠️")
 
