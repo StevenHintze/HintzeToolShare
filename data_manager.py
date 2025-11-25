@@ -64,9 +64,12 @@ class DataManager:
         self.con.execute(f"UPDATE tools SET status='Available', borrower=NULL, due_date=NULL WHERE id='{tool_id}'")
 
     # --- Family Methods ---
+    def get_family_members(self):
+        """Returns the full family dataframe (Restored Function)"""
+        return self.con.execute("SELECT * FROM family ORDER BY name").df()
+
     def get_user_by_email(self, email):
         """Returns the user dictionary if email exists, else None."""
-        # This is the function that was missing!
         result = self.con.execute("SELECT name, role, household FROM family WHERE email = ?", [email]).fetchone()
         
         if result:
@@ -74,7 +77,7 @@ class DataManager:
         return None
 
     def seed_data(self, tools_list, family_list):
-        # Seed Tools
+        # We generally rely on the Admin Script now, but this keeps the logic safe
         if self.con.execute("SELECT count(*) FROM tools").fetchone()[0] == 0:
             print("Seeding Tools...")
             for tool in tools_list:
@@ -83,7 +86,6 @@ class DataManager:
                 self.con.execute("INSERT INTO tools VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
                     (tool['id'], tool['name'], tool['owner'], 'Available', None, None, caps, tool['safety']))
 
-        # Seed Family (Handles empty lists gracefully now)
         if family_list and self.con.execute("SELECT count(*) FROM family").fetchone()[0] == 0:
             print("Seeding Family Tree...")
             for person in family_list:
