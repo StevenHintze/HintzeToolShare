@@ -29,7 +29,8 @@ def get_ai_advice(user_query, available_tools_df):
     1. ONLY recommend tools listed in the INVENTORY. Do not suggest things they don't have.
     2. If the user asks about a project (e.g., "hang a shelf"), list the specific tools they should borrow.
     3. If a tool is "Adult Only" and the project sounds dangerous, add a safety warning.
-    4. Be concise and helpful.
+    4. Provide the current household the tools are in (make sure to check if the tool is currently borrowed). 
+    5. Be concise and helpful.
     
     INVENTORY (Currently Available):
     {tool_context}
