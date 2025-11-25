@@ -2,6 +2,7 @@ import streamlit as st
 from data_manager import DataManager
 from ontology import FAMILY_TOOLS, check_safety 
 import time
+from gemini_helper import get_ai_advice
 
 st.set_page_config(page_title="HFTS", page_icon="🛠️")
 
@@ -56,7 +57,7 @@ if st.sidebar.button("Log Out"):
     st.rerun()
 
 # 3. Main Interface
-tab1, tab2 = st.tabs(["Borrow Tools", "Return Tools"])
+tab1, tab2, tab3 = st.tabs(["Borrow Tools", "Return Tools", "🤖 AI Tool Assistant"])
 
 with tab1:
     st.header("Find & Borrow")
@@ -113,3 +114,25 @@ with tab2:
             st.rerun()
     else:
         st.success("All tools are with their owners and ready for the next project.")
+
+with tab3:
+    st.header("Ask the AI Tool Assistant")
+    st.info("Describe your project, and AI will help you choose the right tools.")
+    
+    # 1. Input
+    project_query = st.text_area("What are you trying to do?", placeholder="e.g., I need to swap out a light fixture, or I want to smoke a brisket.")
+    
+    if st.button("Get Advice"):
+        if project_query:
+            with st.spinner("Thinking..."):
+                # Fetch only AVAILABLE tools to send to AI
+                current_inventory = dm.get_available_tools()
+                
+                # Call our helper function
+                advice = get_ai_advice(project_query, current_inventory)
+                
+                # Display Result
+                st.markdown("### 💡 Recommendation")
+                st.markdown(advice)
+        else:
+            st.warning("Please enter a project description first.")
