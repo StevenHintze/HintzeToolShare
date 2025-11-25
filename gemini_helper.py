@@ -38,9 +38,9 @@ def get_ai_advice(user_query, available_tools_df):
     "{user_query}"
     """
 
-    # 4. Call Gemini 1.5 Flash
+    # 4. Call Gemini 2.5 Flash
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
