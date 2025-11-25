@@ -2,50 +2,68 @@ import google.generativeai as genai
 import streamlit as st
 import json
 
-def get_ai_advice(user_query, available_tools_df):
+def get_smart_recommendations(user_query, available_tools_df):
     """
-    Sends the user's project query + current inventory to Gemini.
+    Analyzes project and returns structured JSON with specific tool IDs to borrow.
     """
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     except Exception as e:
-        return "⚠️ Error: Gemini API Key missing or invalid."
+        return None
 
-    # Format Inventory
-    tool_context = ""
+    # 1. Prepare Inventory Context
+    inventory_list = []
     for index, row in available_tools_df.iterrows():
-        # Handle missing columns gracefully
-        brand = row.get('brand', '')
-        model = row.get('model_no', '')
-        details = f"{brand} {model}".strip()
-        
-        tool_context += f"- {row['name']} [{details}] (Safety: {row['safety_rating']}, Caps: {row['capabilities']})\n"
+        # Use .get() for safety in case a column is empty or missing
+        inventory_list.append({
+            "id": row.get('id', 'Unknown'),
+            "name": row.get('name', 'Unknown Tool'),
+            "brand": row.get('brand', ''),
+            "model": row.get('model_no', ''),
+            "household": row.get('household', 'Unknown'),
+            "specs": row.get('capabilities', ''),
+            "safety": row.get('safety_rating', 'Open')
+        })
+    
+    inventory_json = json.dumps(inventory_list)
 
-    # Note: We use f-strings here. 
+    # 2. The "Logistics Expert" Prompt
     prompt = f"""
-    You are the "Hintze Family Tool Manager." 
+    You are the Hintze Family Tool Manager and Logistics Expert.
     
-    YOUR GOAL:
-    Analyze the user's project and recommend the best tools from the AVAILABLE INVENTORY below.
+    USER PROJECT: "{user_query}"
     
-    RULES:
-    1. ONLY recommend tools listed in the INVENTORY.
-    2. Be practical and concise.
-    3. If a tool is "Adult Only" and the project seems risky, add a brief safety reminder.
+    YOUR TASK:
+    1. Select the specific tools needed from the INVENTORY below.
+    2. OPTIMIZATION RULES:
+       - If multiple similar tools exist (e.g. 3 drills), pick the highest quality/most capable one.
+       - If tools are equal quality, prioritize picking tools from the SAME HOUSEHOLD to save the user driving time.
+       - Do not recommend tools we don't have.
     
-    INVENTORY (Currently Available):
-    {tool_context}
+    INVENTORY JSON:
+    {inventory_json}
     
-    USER QUESTION:
-    "{user_query}"
+    OUTPUT FORMAT:
+    Return ONLY valid JSON (no markdown). Structure:
+    {{
+        "rationale": "Brief explanation of why you chose these tools and this household strategy.",
+        "recommended_tools": [
+            {{
+                "tool_id": "Exact ID from inventory",
+                "reason": "Why this specific tool?"
+            }}
+        ]
+    }}
     """
 
     try:
         model = genai.GenerativeModel('gemini-2.5-flash') 
         response = model.generate_content(prompt)
-        return response.text
+        clean_text = response.text.replace("```json", "").replace("```", "").strip()
+        return json.loads(clean_text)
     except Exception as e:
-        return f"⚠️ AI Error: {str(e)}"
+        st.error(f"AI Logic Error: {e}")
+        return None
 
 def ai_parse_tool(raw_text):
     """
