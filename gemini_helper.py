@@ -20,8 +20,8 @@ def get_ai_advice(user_query, available_tools_df):
 
     # 3. Construct the "System Prompt"
     prompt = f"""
-    You are the "Hintze Family Shop Teacher."
-    
+    You are the "Hintze Family Tool Manager."    
+
     YOUR GOAL:
     Help a family member choose the right tools for their project from the AVAILABLE INVENTORY below.
     

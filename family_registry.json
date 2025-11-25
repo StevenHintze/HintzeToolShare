@@ -1,6 +1,6 @@
 [
-  {"name": "Steven", "role": "ADMIN", "household": "Steve and Sam Hintze", "email": "sjhintze@gmail.com"},
-  {"name": "Samantha", "role": "ADMIN", "household": "Steve and Sam Hintze", "email": "hintze.samantha@gmail.com"},
-  {"name": "Shawn", "role": "ADULT", "household": "Shawn's House", "email": "shawn@example.com"},
-  {"name": "Dwyer", "role": "CHILD", "household": "Steve and Sam Hintze", "email": "dwyer@hintze.family"}
+  {"name": "Steven", "role": "ADMIN", "household": "Steve and Sam's", "email": "sjhintze@gmail.com"},
+  {"name": "Samantha", "role": "ADMIN", "household": "Steve and Sam's", "email": "hintze.samantha@gmail.com"},
+  {"name": "Shawn", "role": "ADULT", "household": "Shawn's", "email": "shawn@example.com"},
+  {"name": "Dwyer", "role": "CHILD", "household": "Steve and Sam's", "email": "dwyer@hintze.family"}
 ]

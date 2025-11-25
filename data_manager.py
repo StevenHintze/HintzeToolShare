@@ -25,6 +25,7 @@ class DataManager:
                 id VARCHAR PRIMARY KEY,
                 name VARCHAR,
                 owner VARCHAR,
+                household VARCHAR,
                 status VARCHAR, 
                 borrower VARCHAR,
                 due_date TIMESTAMP,
@@ -33,7 +34,7 @@ class DataManager:
             )
         """)
         
-        # Family Table - NOW WITH EMAIL
+        # Family Table
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS family (
                 name VARCHAR,

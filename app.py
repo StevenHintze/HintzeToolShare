@@ -1,27 +1,39 @@
 import streamlit as st
 from data_manager import DataManager
 from ontology import FAMILY_TOOLS, check_safety 
+from gemini_helper import ai_parse_tool # Import the AI helper
 import time
-from gemini_helper import get_ai_advice
 
 st.set_page_config(page_title="HFTS", page_icon="🛠️")
 
 # Initialize DB
 dm = DataManager()
-dm.seed_data(FAMILY_TOOLS, [])
+dm.seed_data(FAMILY_TOOLS, []) # Secure seeding (no family names in code)
+
+# --- DYNAMIC DATA LOADING (The Privacy Fix) ---
+# Instead of hard-coding names, we fetch them from the secure DB
+try:
+    family_df = dm.get_family_members()
+    # Create a dictionary: {"Steven": "Hintze HQ", "Shawn": "Shawn's House"}
+    # This runs in memory only - no names are saved in the file!
+    OWNER_HOMES = dict(zip(family_df['name'], family_df['household']))
+    ALL_OWNERS = list(OWNER_HOMES.keys())
+    ALL_HOUSEHOLDS = list(set(OWNER_HOMES.values()))
+except:
+    # Fallback if DB is empty
+    OWNER_HOMES = {}
+    ALL_OWNERS = ["Admin"]
+    ALL_HOUSEHOLDS = ["Main House"]
 
 # --- AUTHENTICATION LOGIC ---
 if "user_info" not in st.session_state:
     st.session_state["user_info"] = None
 
 def login():
-    # Use .get() to avoid errors if key is missing
     email = st.session_state.get("email_input", "").strip().lower()
     password = st.session_state.get("password_input", "")
     
-    # 1. Check Password (Gatekeeper)
     if password == st.secrets["FAMILY_PASSWORD"]:
-        # 2. Check Email (Identity)
         user = dm.get_user_by_email(email)
         if user:
             st.session_state["user_info"] = user
@@ -33,20 +45,19 @@ def login():
     else:
         st.error("Incorrect Family Password.")
 
-# Show Login Screen if not logged in
 if st.session_state["user_info"] is None:
-    st.title("🔐 Login with your email and shared password")
+    st.title("🔐 Family Login")
     st.text_input("Email Address", key="email_input")
     st.text_input("Family Password", type="password", key="password_input")
     if st.button("Log In"):
         login()
-    st.stop() # Stop here until logged in
+    st.stop()
 
-# --- APP STARTS HERE (Only runs if logged in) ---
+# --- APP STARTS HERE ---
 current_user = st.session_state["user_info"]
 st.title(f"🛠️ Hintze Family Tool Share")
 
-# Sidebar Profile
+# Sidebar
 st.sidebar.header("My Profile")
 st.sidebar.write(f"**Name:** {current_user['name']}")
 st.sidebar.write(f"**Role:** {current_user['role']}")
@@ -56,83 +67,128 @@ if st.sidebar.button("Log Out"):
     st.session_state["user_info"] = None
     st.rerun()
 
-# 3. Main Interface
-tab1, tab2, tab3 = st.tabs(["Borrow Tools", "Return Tools", "🤖 AI Tool Assistant"])
+# Main Interface
+# Only show Admin Tab if user is ADMIN
+tabs = ["Borrow Tools", "Return Tools", "🤖 Tool Manager"]
+if current_user['role'] == "ADMIN":
+    tabs.append("🔐 Admin")
 
-with tab1:
+current_tabs = st.tabs(tabs)
+
+# TAB 1: Borrow
+with current_tabs[0]:
     st.header("Find & Borrow")
-    
-    # Search Bar
     search_query = st.text_input("🔍 I need to...", placeholder="e.g. fix a flat tire, drill concrete")
     
-    # Filter Logic
     available_tools = dm.get_available_tools()
     if search_query:
         available_tools = available_tools[available_tools['capabilities'].str.contains(search_query, case=False, na=False)]
     
-    st.dataframe(available_tools[['name', 'safety_rating', 'capabilities', 'owner']])
+    st.dataframe(available_tools[['name', 'household', 'safety_rating', 'capabilities', 'owner']])
 
-    # Borrow Form
     st.subheader("Checkout")
     if not available_tools.empty:
         with st.form("borrow_form"):
             selected_tool_name = st.selectbox("Select Tool", available_tools['name'])
-            days_needed = st.number_input("How many days will you need it?", min_value=1, value=3)
-            submitted = st.form_submit_button("Mark it Borrowed")
-            
-            if submitted:
-                # Safety Check
-                tool_safety = available_tools.loc[available_tools['name'] == selected_tool_name, 'safety_rating'].iloc[0]
-                
-                # FIX 3: Use current_user['role'] instead of current_user_role
-                if check_safety(current_user['role'], tool_safety):
-                    tool_id = available_tools.loc[available_tools['name'] == selected_tool_name, 'id'].iloc[0]
-                    
-                    # FIX 4: Use current_user['name'] instead of current_user_name
-                    dm.borrow_tool(tool_id, current_user['name'], days_needed)
-                    
-                    st.success(f"✅ Tool borrowed - have fun or good luck! {selected_tool_name}.")
+            days_needed = st.number_input("Days Needed", min_value=1, value=3)
+            if st.form_submit_button("Mark it Borrowed"):
+                tool_row = available_tools[available_tools['name'] == selected_tool_name].iloc[0]
+                if check_safety(current_user['role'], tool_row['safety_rating']):
+                    dm.borrow_tool(tool_row['id'], current_user['name'], days_needed)
+                    st.success(f"✅ Borrowed {selected_tool_name}!")
                     st.rerun()
                 else:
-                    # FIX 5: Use dict keys for error message
-                    st.error(f"🚫 STOP: {current_user['name']} ({current_user['role']}) is not allowed to borrow '{selected_tool_name}' ({tool_safety}).")
+                    st.error(f"🚫 Safety Restriction: {tool_row['safety_rating']}")
     else:
-        st.info("Looks like no-one has a tool that fits the bill.")
+        st.info("No matching tools found.")
 
-with tab2:
+# TAB 2: Return
+with current_tabs[1]:
     st.header("Return Tools")
     borrowed_tools = dm.get_borrowed_tools()
-    
     if not borrowed_tools.empty:
         st.dataframe(borrowed_tools[['name', 'borrower', 'due_date']])
-        
-        tool_to_return = st.selectbox("Select Tool to Return", borrowed_tools['name'])
+        tool_to_return = st.selectbox("Select Tool", borrowed_tools['name'])
         if st.button("Mark it Returned"):
             tool_id = borrowed_tools.loc[borrowed_tools['name'] == tool_to_return, 'id'].iloc[0]
             dm.return_tool(tool_id)
-            st.success("✅ Tool returned!")
+            st.success("✅ Returned!")
             st.rerun()
     else:
-        st.success("All tools are with their owners and ready for the next project.")
+        st.success("No tools are currently borrowed.")
 
-with tab3:
-    st.header("Ask the AI Tool Assistant")
-    st.info("Describe your project, and AI will help you choose the right tools.")
-    
-    # 1. Input
-    project_query = st.text_area("What are you trying to do?", placeholder="e.g., I need to swap out a light fixture, or I want to smoke a brisket.")
-    
-    if st.button("Get Advice"):
+# TAB 3: Tool Manager
+with current_tabs[2]:
+    from gemini_helper import get_ai_advice # Lazy import
+    st.header("Ask the Tool Manager")
+    project_query = st.text_area("What are you trying to do?")
+    if st.button("Get Tools and Advice"):
         if project_query:
             with st.spinner("Thinking..."):
-                # Fetch only AVAILABLE tools to send to AI
-                current_inventory = dm.get_available_tools()
-                
-                # Call our helper function
-                advice = get_ai_advice(project_query, current_inventory)
-                
-                # Display Result
-                st.markdown("### 💡 Recommendation")
+                advice = get_ai_advice(project_query, dm.get_available_tools())
                 st.markdown(advice)
-        else:
-            st.warning("Please enter a project description first.")
+
+# TAB 4: Admin (Dynamic & Secure)
+if current_user['role'] == "ADMIN":
+    with current_tabs[3]:
+        st.header("Add New Tool")
+        
+        # AI Section
+        col_ai_1, col_ai_2, col_ai_3 = st.columns([1, 2, 1])
+        with col_ai_1:
+            # Dynamic Dropdown (Populated from DB, not code)
+            quick_owner = st.selectbox("Who bought it?", ALL_OWNERS, key="ai_owner_select")
+        with col_ai_2:
+            raw_input = st.text_input("Paste Description", key="ai_input", label_visibility="collapsed")
+        with col_ai_3:
+            if st.button("✨ Auto-Fill", use_container_width=True):
+                if raw_input:
+                    with st.spinner("Analyzing..."):
+                        ai_data = ai_parse_tool(raw_input)
+                        if ai_data:
+                            st.session_state['form_name'] = ai_data['name']
+                            st.session_state['form_caps'] = ai_data['capabilities']
+                            try:
+                                st.session_state['form_safety_index'] = ["Open", "Supervised", "Adult Only"].index(ai_data['safety'])
+                            except:
+                                st.session_state['form_safety_index'] = 0
+                            
+                            # Smart Household Lookup (From the DB-generated dictionary)
+                            st.session_state['form_owner'] = quick_owner
+                            st.session_state['form_household'] = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0])
+                            st.success("Parsed!")
+
+        # Manual Form
+        with st.form("add_tool"):
+            if 'form_name' not in st.session_state: st.session_state['form_name'] = ""
+            if 'form_caps' not in st.session_state: st.session_state['form_caps'] = ""
+            if 'form_safety_index' not in st.session_state: st.session_state['form_safety_index'] = 0
+            # Default owner/house to first in list
+            default_owner_idx = 0
+            if 'form_owner' in st.session_state and st.session_state['form_owner'] in ALL_OWNERS:
+                 default_owner_idx = ALL_OWNERS.index(st.session_state['form_owner'])
+            
+            default_house_idx = 0
+            if 'form_household' in st.session_state and st.session_state['form_household'] in ALL_HOUSEHOLDS:
+                 default_house_idx = ALL_HOUSEHOLDS.index(st.session_state['form_household'])
+
+            new_name = st.text_input("Tool Name", key="form_name")
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                new_owner = st.selectbox("Owner", ALL_OWNERS, index=default_owner_idx)
+            with c2:
+                new_household = st.selectbox("Location", ALL_HOUSEHOLDS, index=default_house_idx)
+            
+            new_safety = st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], index=st.session_state['form_safety_index'])
+            new_caps = st.text_input("Capabilities", key="form_caps")
+            
+            if st.form_submit_button("Add to Database"):
+                import random
+                new_id = f"TOOL_{random.randint(10000,99999)}"
+                dm.con.execute("INSERT INTO tools VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+                    (new_id, new_name, new_owner, new_household, 'Available', None, None, new_caps, new_safety))
+                st.success(f"Added {new_name}!")
+                st.session_state['form_name'] = ""
+                st.session_state['form_caps'] = ""
+                st.rerun()
