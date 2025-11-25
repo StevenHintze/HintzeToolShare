@@ -1,14 +1,20 @@
 import streamlit as st
+import extra_streamlit_components as stx
 from data_manager import DataManager
 from tools_registry import check_safety 
-from gemini_helper import ai_parse_tool 
+from gemini_helper import ai_parse_tool, get_ai_advice
 import time
+import datetime
 
 st.set_page_config(page_title="HFTS", page_icon="🛠️")
 
 # Initialize DB
 dm = DataManager()
 dm.seed_data([], []) 
+
+# --- COOKIE MANAGER SETUP ---
+# This initializes the connection to the browser's storage
+cookie_manager = stx.CookieManager()
 
 # --- DYNAMIC DATA LOADING ---
 try:
@@ -25,14 +31,17 @@ except:
 if "user_info" not in st.session_state:
     st.session_state["user_info"] = None
 
-# 1. AUTO-LOGIN CHECK (Runs on every refresh)
-# If not logged in, check if the URL has a valid email saved
-if st.session_state["user_info"] is None:
-    if "user_email" in st.query_params:
-        saved_email = st.query_params["user_email"]
-        user = dm.get_user_by_email(saved_email)
-        if user:
-            st.session_state["user_info"] = user
+# 1. CHECK FOR COOKIES (Runs on every load)
+# We wait for the cookie manager to be ready
+cookie_email = cookie_manager.get(cookie="hfts_user")
+
+if st.session_state["user_info"] is None and cookie_email:
+    # Validate the cookie email against the DB
+    user = dm.get_user_by_email(cookie_email)
+    if user:
+        st.session_state["user_info"] = user
+        # Clean URL if they had the old version
+        st.query_params.clear()
 
 def login():
     email = st.session_state.get("email_input", "").strip().lower()
@@ -42,8 +51,11 @@ def login():
         user = dm.get_user_by_email(email)
         if user:
             st.session_state["user_info"] = user
-            # SAVE TO URL (Persist login)
-            st.query_params["user_email"] = email
+            
+            # SET COOKIE (Valid for 30 days)
+            expires = datetime.datetime.now() + datetime.timedelta(days=7)
+            cookie_manager.set("hfts_user", email, expires_at=expires)
+            
             st.success(f"Welcome back, {user['name']}!")
             time.sleep(1)
             st.rerun()
@@ -54,7 +66,7 @@ def login():
 
 # Show Login Screen if still not logged in
 if st.session_state["user_info"] is None:
-    st.title("🔐 Family Login")
+    st.title("🔐 Enter Your Email and the Family Password")
     st.text_input("Email Address", key="email_input")
     st.text_input("Family Password", type="password", key="password_input")
     if st.button("Log In"):
@@ -72,8 +84,9 @@ st.sidebar.write(f"**Role:** {current_user['role']}")
 st.sidebar.write(f"**House:** {current_user['household']}")
 
 if st.sidebar.button("Log Out"):
+    # DELETE COOKIE
+    cookie_manager.delete("hfts_user")
     st.session_state["user_info"] = None
-    st.query_params.clear() # Clear URL so you don't auto-login again
     st.rerun()
 
 # Main Interface
@@ -127,7 +140,6 @@ with current_tabs[1]:
 
 # TAB 3: Tool Manager
 with current_tabs[2]:
-    from gemini_helper import get_ai_advice 
     st.header("Ask the Tool Manager")
     project_query = st.text_area("What project are you planning?", placeholder="e.g., I need to build a planter box...")
     
@@ -143,13 +155,13 @@ if current_user['role'] == "ADMIN":
         st.header("Add New Tool")
         
         # --- SECTION 1: AI HELPER ---
-        st.markdown("### 🤖 Step 1: Scan Tool")
+        st.markdown("### 🤖 Step 1: Describe Tool")
         st.info("Select the owner, paste the description, and click Auto-Fill.")
         
-        quick_owner = st.selectbox("Who bought it?", ALL_OWNERS, key="ai_owner_select")
-        raw_input = st.text_input("Paste Description (Amazon title, etc.)", key="ai_input")
+        quick_owner = st.selectbox("Who owns it?", ALL_OWNERS, key="ai_owner_select")
+        raw_input = st.text_input("Paste Description (Tool model number and brand, Amazon title, etc.)", key="ai_input")
         
-        if st.button("✨ Auto-Fill", use_container_width=True):
+        if st.button("✨ AI Auto-Fill", use_container_width=True):
             if raw_input:
                 with st.spinner("Analyzing..."):
                     ai_data = ai_parse_tool(raw_input)
@@ -163,7 +175,7 @@ if current_user['role'] == "ADMIN":
                         
                         st.session_state['form_owner'] = quick_owner
                         st.session_state['form_household'] = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0])
-                        st.success("✅ Parsed! Check Step 2 below.")
+                        st.success("AI Generated Details - Check Step 2 below.")
             else:
                 st.error("Please paste a description first.")
 
@@ -177,7 +189,6 @@ if current_user['role'] == "ADMIN":
             if 'form_caps' not in st.session_state: st.session_state['form_caps'] = ""
             if 'form_safety_index' not in st.session_state: st.session_state['form_safety_index'] = 0
             
-            # Smart Defaults
             default_owner_idx = 0
             if 'form_owner' in st.session_state and st.session_state['form_owner'] in ALL_OWNERS:
                  default_owner_idx = ALL_OWNERS.index(st.session_state['form_owner'])
@@ -193,8 +204,8 @@ if current_user['role'] == "ADMIN":
             new_safety = st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], index=st.session_state['form_safety_index'])
             new_caps = st.text_input("Capabilities", key="form_caps")
             
-            # The Save Button (Fixed: Removed clear-lines to prevent crash)
-            if st.form_submit_button("💾 Add to Database", use_container_width=True):
+            # The Save Button
+            if st.form_submit_button("Save Tool", use_container_width=True):
                 import random
                 new_id = f"TOOL_{random.randint(10000,99999)}"
                 dm.con.execute("INSERT INTO tools VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", 
