@@ -11,30 +11,30 @@ class DataManager:
             self.con_str = 'inventory.db' 
         
         self.con = duckdb.connect(self.con_str)
-        
-        # Ensure we are in the right database
         self.con.execute("CREATE DATABASE IF NOT EXISTS hintze_inventory")
         self.con.execute("USE hintze_inventory")
-        
         self._init_schema()
 
     def _init_schema(self):
-        # Tools Table
+        # Tools Table (Updated Schema)
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS tools (
                 id VARCHAR PRIMARY KEY,
                 name VARCHAR,
+                brand VARCHAR,
+                model_no VARCHAR,
+                power_source VARCHAR,
                 owner VARCHAR,
                 household VARCHAR,
+                bin_location VARCHAR,
                 status VARCHAR, 
                 borrower VARCHAR,
-                due_date TIMESTAMP,
+                return_date TIMESTAMP, -- RENAMED
                 capabilities VARCHAR, 
                 safety_rating VARCHAR
             )
         """)
         
-        # Family Table
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS family (
                 name VARCHAR,
@@ -44,7 +44,6 @@ class DataManager:
             )
         """)
 
-    # --- Tool Methods ---
     def get_available_tools(self):
         return self.con.execute("SELECT * FROM tools WHERE status = 'Available'").df()
     
@@ -52,42 +51,27 @@ class DataManager:
         return self.con.execute("SELECT * FROM tools WHERE status = 'Borrowed'").df()
 
     def borrow_tool(self, tool_id, user, days):
+        # UPDATED: Set return_date
         self.con.execute(f"""
             UPDATE tools 
             SET status = 'Borrowed', 
                 borrower = '{user}', 
-                due_date = current_date + INTERVAL '{days} days'
+                return_date = current_date + INTERVAL '{days} days'
             WHERE id = '{tool_id}'
         """)
     
     def return_tool(self, tool_id):
-        self.con.execute(f"UPDATE tools SET status='Available', borrower=NULL, due_date=NULL WHERE id='{tool_id}'")
+        # UPDATED: Reset return_date
+        self.con.execute(f"UPDATE tools SET status='Available', borrower=NULL, return_date=NULL WHERE id='{tool_id}'")
 
-    # --- Family Methods ---
     def get_family_members(self):
-        """Returns the full family dataframe (Restored Function)"""
         return self.con.execute("SELECT * FROM family ORDER BY name").df()
 
     def get_user_by_email(self, email):
-        """Returns the user dictionary if email exists, else None."""
         result = self.con.execute("SELECT name, role, household FROM family WHERE email = ?", [email]).fetchone()
-        
         if result:
             return {"name": result[0], "role": result[1], "household": result[2]}
         return None
 
     def seed_data(self, tools_list, family_list):
-        # We generally rely on the Admin Script now, but this keeps the logic safe
-        if self.con.execute("SELECT count(*) FROM tools").fetchone()[0] == 0:
-            print("Seeding Tools...")
-            for tool in tools_list:
-                caps = tool['capabilities']
-                if isinstance(caps, list): caps = ",".join(caps)
-                self.con.execute("INSERT INTO tools VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
-                    (tool['id'], tool['name'], tool['owner'], 'Available', None, None, caps, tool['safety']))
-
-        if family_list and self.con.execute("SELECT count(*) FROM family").fetchone()[0] == 0:
-            print("Seeding Family Tree...")
-            for person in family_list:
-                self.con.execute("INSERT INTO family VALUES (?, ?, ?, ?)", 
-                    (person['name'], person['role'], person['household'], person['email']))
+        pass # Handled by admin_upload.py
