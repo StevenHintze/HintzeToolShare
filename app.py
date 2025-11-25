@@ -12,15 +12,10 @@ dm = DataManager()
 dm.seed_data([], []) 
 
 # --- DYNAMIC DATA LOADING ---
-try:
-    family_df = dm.get_family_members()
-    OWNER_HOMES = dict(zip(family_df['name'], family_df['household']))
-    ALL_OWNERS = list(OWNER_HOMES.keys())
-    ALL_HOUSEHOLDS = list(set(OWNER_HOMES.values()))
-except:
-    OWNER_HOMES = {}
-    ALL_OWNERS = ["Admin"]
-    ALL_HOUSEHOLDS = ["Main House"]
+family_df = dm.get_family_members()
+OWNER_HOMES = dict(zip(family_df['name'], family_df['household']))
+ALL_OWNERS = list(OWNER_HOMES.keys())
+ALL_HOUSEHOLDS = list(set(OWNER_HOMES.values()))
 
 # --- AUTHENTICATION LOGIC ---
 if "user_info" not in st.session_state:
