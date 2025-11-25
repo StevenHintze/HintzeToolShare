@@ -187,6 +187,4 @@ if current_user['role'] == "ADMIN":
                 st.success(f"✅ Saved: {new_name}")
                 
                 # Clear form
-                st.session_state['form_name'] = ""
-                st.session_state['form_caps'] = ""
                 st.rerun()
