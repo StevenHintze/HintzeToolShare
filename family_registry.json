@@ -2,5 +2,6 @@
   {"name": "Steven", "role": "ADMIN", "household": "Steve and Sam's", "email": "sjhintze@gmail.com"},
   {"name": "Samantha", "role": "ADMIN", "household": "Steve and Sam's", "email": "hintze.samantha@gmail.com"},
   {"name": "Shawn", "role": "ADULT", "household": "Shawn's", "email": "shawn@example.com"},
-  {"name": "Dwyer", "role": "CHILD", "household": "Steve and Sam's", "email": "dwyer@hintze.family"}
+  {"name": "Dwyer", "role": "CHILD", "household": "Steve and Sam's", "email": "dwyer@hintze.family"},
+  {"name": "Jerry", "role": "ADULT", "household": "Jerry and Beth", "email": "jbhintzefamily@gmail.com"},
 ]
