@@ -8,7 +8,7 @@ import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.19", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.20", page_icon="🛠️")
 
 # Initialize DB
 dm = DataManager()
@@ -90,8 +90,8 @@ if st.sidebar.button("Log Out"):
     time.sleep(1) 
     st.rerun()
 
-# Tabs (Renamed Tab 1)
-tabs = ["Inventory", "Return Tools", "🤖 Tool Manager"]
+# Tabs
+tabs = ["Inventory", "Return Tools", "🚀 Project Planner"]
 if current_user['role'] in ["ADMIN", "ADULT"]:
     tabs.append("🔐 Manage")
 
@@ -240,20 +240,24 @@ with current_tabs[1]:
     else:
         st.success("All your tools are safe at home.")
 
-# TAB 3: Smart Tool Manager
+# TAB 3: Project Planner
 with current_tabs[2]:
-    st.header("Ask the Tool Manager")
+    st.header("Project Planner")
     
     if "ai_recs" not in st.session_state:
         st.session_state["ai_recs"] = None
 
     if st.session_state["ai_recs"] is None:
-        st.info(f"Planning a project? I'll check your household first, then look for loans.")
-        project_query = st.text_area("Describe your project:", placeholder="e.g. I need to sand and stain the deck...")
+        st.info(f"Describe your job. I'll check your household, find loans, and identify missing items.")
         
-        if st.button("Analyze Needs"):
+        # BUG FIX #1: Wrapped in form so Ctrl+Enter triggers submit
+        with st.form("project_form"):
+            project_query = st.text_area("Describe your project:", placeholder="e.g. I need to rotate my tires and change the oil...")
+            submit_search = st.form_submit_button("Analyze Needs")
+        
+        if submit_search:
             if project_query:
-                with st.spinner("Checking inventory..."):
+                with st.spinner("Consulting the inventory..."):
                     all_tools_df = dm.con.execute("SELECT * FROM tools").df()
                     recs = get_smart_recommendations(project_query, all_tools_df, current_user['household'])
                     if recs:
@@ -261,36 +265,59 @@ with current_tabs[2]:
                         st.rerun()
     else:
         recs = st.session_state["ai_recs"]
-        if st.button("← New Search"):
+        if st.button("← Start Over"):
             st.session_state["ai_recs"] = None
             st.rerun()
 
+        # 1. Things you have
         if recs.get('locate_list'):
             st.success("✅ **You already own these:**")
             for item in recs['locate_list']:
-                st.markdown(f"- **{item['tool_name']}**")
+                st.markdown(f"- **{item['tool_name']}** ({item.get('location', 'Home')})")
         
+        # 2. Things to chase down
         if recs.get('track_down_list'):
             st.warning("⚠️ **You own these, but they are gone:**")
             for item in recs['track_down_list']:
                 st.markdown(f"- **{item['tool_name']}** is with **{item['held_by']}**")
 
+        # 3. THINGS MISSING (Bug Fix #2)
+        if recs.get('missing_list'):
+            st.error("🛑 **Missing Essentials (Not in Family Registry):**")
+            for item in recs['missing_list']:
+                st.markdown(f"**{item['tool_name']}** ({item['importance']})")
+                st.caption(f"💡 *Advice: {item['advice']}*")
+
+        # 4. The Shopping Cart
         if recs.get('borrow_list'):
-            st.info("🛒 **Logistics Plan:**")
+            st.info("🛒 **Tools to Borrow:**")
             with st.form("smart_borrow"):
                 selected_ids = []
                 for item in recs['borrow_list']:
                     label = f"**{item['name']}** from {item['household']}"
-                    if st.checkbox(label, value=True, help=item['reason']):
-                        selected_ids.append(item['tool_id'])
+                    # Only show checkbox if we have a valid ID
+                    if item.get('tool_id') and item['tool_id'] != "Unknown":
+                        if st.checkbox(label, value=True, help=item['reason']):
+                            selected_ids.append(item['tool_id'])
+                    else:
+                        st.write(f"⚠️ Error: AI recommended '{item['name']}' but couldn't find a valid ID.")
                 
+                st.markdown("---")
                 days = st.number_input("Days needed:", min_value=1, value=7)
                 if st.form_submit_button("Confirm Borrow Request"):
-                    for tid in selected_ids:
-                        dm.borrow_tool(tid, current_user['name'], days)
-                    st.success("Tools borrowed!")
-                    st.session_state["ai_recs"] = None
-                    st.rerun()
+                    if selected_ids:
+                        for tid in selected_ids:
+                            dm.borrow_tool(tid, current_user['name'], days)
+                        st.success("Tools borrowed!")
+                        st.session_state["ai_recs"] = None
+                        time.sleep(2)
+                        st.rerun()
+                    else:
+                        st.warning("No tools selected.")
+        
+        # If nothing to do
+        elif not recs.get('missing_list'):
+            st.info("Looks like you have everything you need at home! Good luck.")
 
 # TAB 4: Manage Inventory
 if current_user['role'] in ["ADMIN", "ADULT"]:
