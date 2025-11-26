@@ -13,6 +13,8 @@ st.set_page_config(page_title="HFTS v0.9.20", page_icon="🛠️")
 # Initialize DB
 dm = DataManager()
 dm.seed_data([], []) 
+if st.sidebar.button("Admin Cleanup", key="cleanup"): # Hidden utility
+    dm.clean_old_sessions()
 
 # --- COOKIE MANAGER ---
 cookie_manager = stx.CookieManager()
@@ -32,13 +34,17 @@ except:
 if "user_info" not in st.session_state:
     st.session_state["user_info"] = None
 
-cookie_email = cookie_manager.get(cookie="hfts_user")
+cookie_token = cookie_manager.get(cookie="hfts_session")
 
-if st.session_state["user_info"] is None and cookie_email:
-    user = dm.get_user_by_email(cookie_email)
+if st.session_state["user_info"] is None and cookie_token:
+    # Validate TOKEN against DB (Secure)
+    user = dm.get_user_from_session(cookie_token)
     if user:
         st.session_state["user_info"] = user
         st.query_params.clear()
+    else:
+        # Token is invalid/expired, delete the bad cookie
+        cookie_manager.delete("hfts_session")
 
 def login():
     email = st.session_state.get("email_input", "").strip().lower()
@@ -48,8 +54,14 @@ def login():
         user = dm.get_user_by_email(email)
         if user:
             st.session_state["user_info"] = user
+            
+            # SECURITY UPGRADE: Create Server-Side Session
+            token = dm.create_session(email)
+            
+            # Save TOKEN to cookie, not Email
             expires = datetime.datetime.now() + datetime.timedelta(days=30)
-            cookie_manager.set("hfts_user", email, expires_at=expires)
+            cookie_manager.set("hfts_session", token, expires_at=expires)
+            
             st.success(f"Welcome back, {user['name']}!")
             time.sleep(1)
             st.rerun()
@@ -85,7 +97,14 @@ st.sidebar.write(f"**Role:** {current_user['role']}")
 st.sidebar.write(f"**House:** {current_user['household']}")
 
 if st.sidebar.button("Log Out"):
-    cookie_manager.delete("hfts_user")
+    # 1. Remove from Browser
+    cookie_token = cookie_manager.get(cookie="hfts_session")
+    cookie_manager.delete("hfts_session")
+    
+    # 2. Remove from Server (Revoke access immediately)
+    if cookie_token:
+        dm.revoke_session(cookie_token)
+        
     st.session_state["user_info"] = None
     time.sleep(1) 
     st.rerun()

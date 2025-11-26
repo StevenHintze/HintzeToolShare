@@ -60,6 +60,47 @@ class DataManager:
             )
         """)
 
+        #4. Session Table
+        self.con.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                token VARCHAR PRIMARY KEY,
+                email VARCHAR,
+                created_at TIMESTAMP,
+                expires_at TIMESTAMP
+            )
+        """)
+        # --- Session Management ---
+    def create_session(self, email):
+        """Generates a secure token and saves it to DB."""
+        import uuid
+        token = str(uuid.uuid4())
+        # Valid for 7 days
+        self.con.execute(f"""
+            INSERT INTO sessions VALUES 
+            ('{token}', '{email}', current_timestamp, current_timestamp + INTERVAL '7 days')
+        """)
+        return token
+
+    def get_user_from_session(self, token):
+        """Validates token and returns user info."""
+        # Check if token exists AND is not expired
+        result = self.con.execute("""
+            SELECT email FROM sessions 
+            WHERE token = ? AND expires_at > current_timestamp
+        """, [token]).fetchone()
+        
+        if result:
+            email = result[0]
+            return self.get_user_by_email(email)
+        return None
+
+    def revoke_session(self, token):
+        """Logs the user out server-side."""
+        self.con.execute("DELETE FROM sessions WHERE token = ?", [token])
+        
+    def clean_old_sessions(self):
+        """Maintenance task to remove expired tokens."""
+        self.con.execute("DELETE FROM sessions WHERE expires_at < current_timestamp")
     # --- Read Methods ---
     def get_available_tools(self):
         return self.con.execute("SELECT * FROM tools WHERE status = 'Available'").df()
