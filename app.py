@@ -384,7 +384,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
             st.caption("Editing ONLY tools you own.")
 
         # CONFIG: Enable Selection
-        selection = st.data_editor(
+        edited_tools = st.data_editor(
             edit_df,
             column_config={
                 "id": st.column_config.TextColumn(disabled=True),
@@ -396,9 +396,8 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 "safety_rating": st.column_config.SelectboxColumn(options=["Open", "Supervised", "Adult Only"]),
             },
             hide_index=True,
-            key="tool_editor",
-            on_change=None, # We handle selection via state
-            selection_mode="single-row" # Enable row selection!
+            key="tool_editor"
+            # REMOVED selection_mode to fix crash
         )
 
         if st.button("💾 Save Changes"):
