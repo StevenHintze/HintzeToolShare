@@ -46,13 +46,14 @@ def get_ai_advice(user_query, available_tools_df):
 
 def get_smart_recommendations(user_query, available_tools_df, user_household):
     """
-    Analyzes project and returns structured JSON with 3 categories of tools.
+    Analyzes project and returns structured JSON with 4 categories of tools.
     """
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     except Exception as e:
         return None
 
+    # 1. Prepare Inventory Context
     inventory_list = []
     for index, row in available_tools_df.iterrows():
         status_detail = "Available"
@@ -65,29 +66,32 @@ def get_smart_recommendations(user_query, available_tools_df, user_household):
             "brand": row.get('brand', ''),
             "household": row.get('household', 'Unknown'),
             "status": status_detail,
+            "is_stationary": row.get('is_stationary', False),
             "specs": row.get('capabilities', ''),
-            "stationary": row.get('is_stationary', False),
             "safety": row.get('safety_rating', 'Open')
         })
     
     inventory_json = json.dumps(inventory_list)
 
+    # 2. The Updated Prompt
     prompt = f"""
     You are the Hintze Family Tool Manager.
     USER PROJECT: "{user_query}"
     USER'S HOUSEHOLD: "{user_household}"
     
     YOUR TASK:
-    Identify the best tools for the job and categorize them based on the user's location.
+    Analyze the project. List the tools needed. Cross-reference with the INVENTORY JSON.
     
     CATEGORIES:
-    1. "locate": Tools the user OWNS (same household) that are Available.
-    2. "track_down": Tools the user OWNS but are currently BORROWED by someone else.
-    3. "borrow": Tools the user DOES NOT OWN (different household) that they need to borrow.
+    1. "locate": Tools the user OWNS (same household).
+    2. "track_down": Tools the user OWNS but are currently BORROWED.
+    3. "borrow": Tools the user DOES NOT OWN but exist in the inventory.
+    4. "missing": Essential tools for this job that are NOT in the inventory.
     
-    LOGISTICS RULES:
-    - If a tool is "is_stationary": true, explicitly mention in the 'reason' that the user must travel to {user_household} to use it.
-
+    STRICT RULES:
+    - Do NOT invent tools. If it's not in the JSON, it goes in "missing".
+    - If a critical tool is "missing", advise if the job is safe to proceed without it or if they need to buy/rent it.
+    
     INVENTORY JSON:
     {inventory_json}
     
@@ -95,13 +99,20 @@ def get_smart_recommendations(user_query, available_tools_df, user_household):
     {{
         "rationale": "Brief strategy explanation.",
         "locate_list": [ {{"tool_name": "...", "location": "Bin/Shelf..."}} ],
-        "track_down_list": [ {{"tool_name": "...", "held_by": "Name of borrower"}} ],
+        "track_down_list": [ {{"tool_name": "...", "held_by": "Name"}} ],
         "borrow_list": [
             {{
                 "tool_id": "ID",
                 "name": "...",
                 "household": "...",
                 "reason": "..."
+            }}
+        ],
+        "missing_list": [
+            {{
+                "tool_name": "Generic Name (e.g. Floor Jack)",
+                "importance": "Critical/Optional",
+                "advice": "Buy this or use the bottle jack from your truck"
             }}
         ]
     }}
