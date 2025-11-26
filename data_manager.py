@@ -16,7 +16,6 @@ class DataManager:
         self._init_schema()
 
     def _init_schema(self):
-        # Tools Table (Updated Schema)
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS tools (
                 id VARCHAR PRIMARY KEY,
@@ -27,9 +26,10 @@ class DataManager:
                 owner VARCHAR,
                 household VARCHAR,
                 bin_location VARCHAR,
+                is_stationary BOOLEAN, -- <--- ADD THIS
                 status VARCHAR, 
                 borrower VARCHAR,
-                return_date TIMESTAMP, -- RENAMED
+                return_date TIMESTAMP,
                 capabilities VARCHAR, 
                 safety_rating VARCHAR
             )

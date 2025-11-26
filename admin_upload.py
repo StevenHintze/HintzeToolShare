@@ -41,13 +41,12 @@ def upload_all():
             t.setdefault('brand', '')
             t.setdefault('model_no', '')
             t.setdefault('power_source', 'Manual')
+            if 'is_stationary' not in t: t['is_stationary'] = False # Default is transportable
 
         df_tools = pd.DataFrame(tool_list)
         df_tools = df_tools.rename(columns={'safety': 'safety_rating'})
         
         con.execute("DROP TABLE IF EXISTS tools")
-        
-        # NEW SCHEMA (No manual_url, return_date updated)
         con.execute("""
             CREATE TABLE tools (
                 id VARCHAR PRIMARY KEY,
@@ -58,6 +57,7 @@ def upload_all():
                 owner VARCHAR,
                 household VARCHAR,
                 bin_location VARCHAR,
+                is_stationary BOOLEAN, -- <--- NEW COLUMN
                 status VARCHAR, 
                 borrower VARCHAR,
                 return_date TIMESTAMP,
@@ -66,12 +66,11 @@ def upload_all():
             )
         """)
         
-        # Explicit Select (Removed manual_url)
         con.execute("""
             INSERT INTO tools 
             SELECT 
                 id, name, brand, model_no, power_source, 
-                owner, household, bin_location,
+                owner, household, bin_location, is_stationary,
                 'Available' as status, 
                 NULL as borrower, 
                 NULL as return_date, 

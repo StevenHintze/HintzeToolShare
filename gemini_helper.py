@@ -66,6 +66,7 @@ def get_smart_recommendations(user_query, available_tools_df, user_household):
             "household": row.get('household', 'Unknown'),
             "status": status_detail,
             "specs": row.get('capabilities', ''),
+            "stationary": row.get('is_stationary', False),
             "safety": row.get('safety_rating', 'Open')
         })
     
@@ -84,6 +85,9 @@ def get_smart_recommendations(user_query, available_tools_df, user_household):
     2. "track_down": Tools the user OWNS but are currently BORROWED by someone else.
     3. "borrow": Tools the user DOES NOT OWN (different household) that they need to borrow.
     
+    LOGISTICS RULES:
+    - If a tool is "is_stationary": true, explicitly mention in the 'reason' that the user must travel to {user_household} to use it.
+
     INVENTORY JSON:
     {inventory_json}
     
@@ -166,7 +170,8 @@ def ai_parse_tool(raw_text):
         4. Power: Choose one: "Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic".
         5. Safety: "Open", "Supervised", or "Adult Only".
         6. Capabilities: A clean string of 3-5 comma-separated keywords.
-        
+        7. Stationary: Boolean (true/false). True if the tool is too large/heavy to move easily (e.g. 60gal compressor, car lift, cabinet saw). False for portable tools.
+
         OUTPUT FORMAT:
         Return ONLY valid JSON.
         {{
@@ -176,6 +181,7 @@ def ai_parse_tool(raw_text):
             "power_source": "...",
             "safety": "...",
             "capabilities": "..."
+            "is_stationary": true/false
         }}
         """
         response = model.generate_content(prompt)
