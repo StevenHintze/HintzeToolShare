@@ -355,11 +355,15 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 if col_yes.button("Confirm Update", type="primary", use_container_width=True):
                     count = 0
                     for change in st.session_state['pending_moves']:
-                        data = change['_data']
+                        data = change['_data'] # Get raw data for action type
+                        
                         if data.get('action') == 'RETIRE':
-                            dm.retire_tool(data['tool_id'], data.get('reason', 'Retired'), current_user['name'])
+                            # For retire, we trust the raw ID
+                            dm.retire_tool(change['ID'], data.get('reason', 'Retired'), current_user['name'])
                         else:
-                            dm.update_tool_location(data['tool_id'], data.get('new_bin'), data.get('new_household'), current_user['name'])
+                            # FIX: Use the calculated values (_bin, _house) we stored in the preview list
+                            dm.update_tool_location(change['ID'], change['_bin'], change['_house'], current_user['name'])
+                        
                         count += 1
                     
                     st.toast(
