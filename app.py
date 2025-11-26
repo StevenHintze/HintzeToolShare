@@ -437,11 +437,10 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
             },
             hide_index=True,
             key="tool_editor"
-            # REMOVED selection_mode to fix crash
         )
 
         if st.button("💾 Save Changes"):
-            dm.batch_update_tools(selection, current_user['name'])
+            dm.batch_update_tools(edited_tools, current_user['name'])
             st.toast("Inventory updated successfully!", icon="💾")
             time.sleep(1)
             st.rerun()
