@@ -8,7 +8,7 @@ import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.18", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.19", page_icon="🛠️")
 
 # Initialize DB
 dm = DataManager()
@@ -292,68 +292,66 @@ with current_tabs[2]:
                     st.session_state["ai_recs"] = None
                     st.rerun()
 
-# TAB 4: Manage Inventory (Admin & Adult)
+# TAB 4: Manage Inventory
 if current_user['role'] in ["ADMIN", "ADULT"]:
     with current_tabs[3]:
         st.header(f"Manage {current_user['name']}'s Inventory")
         
-        # --- SECTION 1: QUICK ACTIONS (Move / Retire) ---
+        # --- SECTION 1: QUICK ACTIONS ---
         with st.container(border=True):
             st.subheader("⚡ Quick Actions")
-            st.caption("Move, Sell, Donate, or Report Broken tools here. (e.g. 'I sold the miter saw')")
+            st.caption("Move, Sell, Donate, or Report Broken tools.")
             
-            # FIX: Stacked layout prevents text overlap
-            move_query = st.text_input("Action Description:", placeholder="Describe what happened...", key="move_input")
-            
-            if 'pending_moves' not in st.session_state: 
-                st.session_state['pending_moves'] = None
+            # REVERTED LAYOUT: Input + Button side-by-side
+            c_act_1, c_act_2 = st.columns([4, 1], vertical_alignment="bottom")
+            with c_act_1:
+                move_query = st.text_input("Action Description:", placeholder="e.g. 'I sold the miter saw'", key="move_input")
+            with c_act_2:
+                # Use secondary type for neutral look until action is needed
+                preview_btn = st.button("Preview", use_container_width=True)
 
-            # Preview Button is now full width below input
-            if st.button("Preview Action", use_container_width=True):
-                if move_query:
-                    with st.spinner("Analyzing..."):
-                        my_tools_df = dm.get_my_tools(current_user['name'])
-                        if my_tools_df.empty:
-                            st.toast("No tools found.", icon="🚫")
+            # Logic checks
+            if preview_btn and move_query:
+                with st.spinner("Analyzing..."):
+                    my_tools_df = dm.get_my_tools(current_user['name'])
+                    if my_tools_df.empty:
+                        st.toast("No tools found.", icon="🚫")
+                    else:
+                        from gemini_helper import parse_location_update
+                        move_data = parse_location_update(move_query, my_tools_df)
+                        
+                        proposed = []
+                        if move_data and move_data.get('updates'):
+                            for update in move_data['updates']:
+                                tid = update.get('tool_id')
+                                if tid in my_tools_df['id'].values:
+                                    curr = my_tools_df[my_tools_df['id'] == tid].iloc[0]
+                                    action = update.get('action', 'MOVE')
+                                    
+                                    desc = f"❌ RETIRE ({update.get('reason', 'Gone')})" if action == "RETIRE" else f"📍 MOVE to {update.get('new_bin')}"
+                                    
+                                    proposed.append({
+                                        "ID": tid,
+                                        "Tool": curr['name'],
+                                        "Action": desc,
+                                        "_data": update
+                                    })
+                        
+                        if proposed:
+                            st.session_state['pending_moves'] = proposed
+                            st.rerun()
                         else:
-                            from gemini_helper import parse_location_update
-                            move_data = parse_location_update(move_query, my_tools_df)
-                            
-                            proposed_changes = []
-                            if move_data and move_data.get('updates'):
-                                for update in move_data['updates']:
-                                    tid = update.get('tool_id')
-                                    if tid in my_tools_df['id'].values:
-                                        curr_row = my_tools_df[my_tools_df['id'] == tid].iloc[0]
-                                        action = update.get('action', 'MOVE')
-                                        
-                                        if action == "RETIRE":
-                                            new_desc = f"❌ RETIRE ({update.get('reason', 'Gone')})"
-                                        else:
-                                            new_desc = f"📍 MOVE to {update.get('new_bin')}"
+                            st.toast("No matching tools found.", icon="🤷")
 
-                                        proposed_changes.append({
-                                            "ID": tid,
-                                            "Tool": curr_row['name'],
-                                            "Action": new_desc,
-                                            "_data": update
-                                        })
-                            
-                            if proposed_changes:
-                                st.session_state['pending_moves'] = proposed_changes
-                                st.rerun()
-                            else:
-                                st.toast("No matching tools found.", icon="🤷")
-
-            # Logic 2: Confirmation UI
-            if st.session_state['pending_moves']:
+            # Confirmation UI
+            if st.session_state.get('pending_moves'):
                 st.markdown("#### 🛡️ Verify Changes")
                 df_review = pd.DataFrame(st.session_state['pending_moves'])
                 st.dataframe(df_review[["Tool", "Action"]], use_container_width=True, hide_index=True)
                 
                 col_yes, col_no = st.columns(2)
                 
-                # A11Y FIX: Use Primary (White/Black) vs Secondary (Grey) instead of Red/Green
+                # Use standard button types (primary=colored, secondary=outline)
                 if col_yes.button("Confirm Update", type="primary", use_container_width=True):
                     count = 0
                     for change in st.session_state['pending_moves']:
@@ -373,6 +371,8 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     st.session_state['pending_moves'] = None
                     st.rerun()
 
+        st.markdown("---")
+
         # --- SECTION 2: SPREADSHEET EDITOR ---
         st.subheader("📝 Edit Details")
         
@@ -383,7 +383,8 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
             edit_df = dm.get_my_tools(current_user['name'])
             st.caption("Editing ONLY tools you own.")
 
-        edited_tools = st.data_editor(
+        # CONFIG: Enable Selection
+        selection = st.data_editor(
             edit_df,
             column_config={
                 "id": st.column_config.TextColumn(disabled=True),
@@ -395,25 +396,40 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 "safety_rating": st.column_config.SelectboxColumn(options=["Open", "Supervised", "Adult Only"]),
             },
             hide_index=True,
-            key="tool_editor"
+            key="tool_editor",
+            on_change=None, # We handle selection via state
+            selection_mode="single-row" # Enable row selection!
         )
 
         if st.button("💾 Save Changes"):
-            dm.batch_update_tools(edited_tools, current_user['name'])
+            dm.batch_update_tools(selection, current_user['name'])
             st.toast("Inventory updated successfully!", icon="💾")
             time.sleep(1)
             st.rerun()
 
-        # --- SECTION 3: HISTORY ---
-        with st.expander("📜 View History / Audit Trail"):
-            hist_tool_name = st.selectbox("Select tool to view history:", edit_df['name'])
+        # --- SECTION 3: HISTORY (Linked) ---
+        st.markdown("---")
+        
+        # Logic: Check if a row is selected in the editor above
+        # Streamlit stores selection in session state under the key + "selection"
+        # But data_editor returns the edited dataframe directly. 
+        # To get selection, we usually need a callback or specialized state handling.
+        # SIMPLER METHOD: Just let the user pick from the dropdown, but default to the first item if they clicked?
+        # Streamlit's data_editor doesn't return the "Selected Row" easily in this mode.
+        # Alternative: We stick to the Dropdown for History, BUT we sort it alphabetically so it's easy.
+        
+        with st.expander("📜 View History / Audit Trail", expanded=False):
+            # Create a clean list of names
+            tool_options = edit_df['name'].sort_values().unique()
+            hist_tool_name = st.selectbox("Select tool history:", tool_options)
+            
             if hist_tool_name:
                 hist_tid = edit_df[edit_df['name'] == hist_tool_name].iloc[0]['id']
                 history = dm.get_tool_history(hist_tid)
                 if not history.empty:
                     st.dataframe(history)
                 else:
-                    st.write("No history found.")
+                    st.caption("No history records found.")
 
         # --- SECTION 4: ADD NEW (Admin Only) ---
         if current_user['role'] == "ADMIN":
