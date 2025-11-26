@@ -362,7 +362,16 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                             dm.update_tool_location(data['tool_id'], data.get('new_bin'), data.get('new_household'), current_user['name'])
                         count += 1
                     
-                    st.toast(f"Success! Updated {count} tools.", icon="✅")
+                    st.toast(
+                        f"""
+                        **✅ Update Complete**
+                        
+                        We moved **{count}** tools to:
+                        
+                        `{change['_data'].get('new_bin', 'New Location')}`
+                        """,
+                        icon="📦"
+                    )
                     st.session_state['pending_moves'] = None
                     time.sleep(1)
                     st.rerun()
@@ -471,7 +480,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                                 st.session_state['form_household'] = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0])
                             
                             st.toast("AI Generated Details - Check Step 2", icon="🤖")
-                            time.sleep(0.5)
+                            time.sleep(0.9)
                             st.rerun() 
                         else:
                             st.error("AI could not generate details from description.")
@@ -525,6 +534,13 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                         new_id = f"TOOL_{uuid.uuid4().hex[:6].upper()}"
                         dm.con.execute("INSERT INTO tools VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
                             (new_id, new_name, new_brand, new_model, new_power, new_owner, new_household, new_bin, new_stationary, 'Available', None, None, new_caps, new_safety))
-                        st.toast(f"Saved: {new_name}", icon="✅")
+                        st.toast(
+                            f"""
+                            **💾 Tool Added**
+                            
+                            **{new_name}** has been added to the tool registry.
+                            """,
+                            icon="🛠️"
+                        )
                         time.sleep(1)
                         st.rerun()
