@@ -190,30 +190,43 @@ def ai_parse_tool(raw_text):
     except Exception as e:
         return None
 
-def parse_location_update(user_query):
+def parse_location_update(user_query, user_tools_df):
     """
-    Extracts MULTIPLE tool names and locations from natural language.
+    Analyzes user query against their specific inventory to find Tool IDs to move.
     """
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        prompt = f"""
-        Extract TARGET TOOLS and NEW LOCATIONS from this text.
-        Handle lists (e.g. "Moved drill, saw, and hammer to shed").
+        # Create a mini-context of the user's own tools
+        # We include ID, Name, and Brand so it can match "Tekton" or "Drills"
+        tool_list_str = ""
+        for index, row in user_tools_df.iterrows():
+            tool_list_str += f"- ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']} | Loc: {row['bin_location']}\n"
         
-        TEXT: "{user_query}"
+        prompt = f"""
+        You are an Inventory Manager.
+        
+        USER REQUEST: "{user_query}"
+        
+        USER'S INVENTORY:
+        {tool_list_str}
+        
+        YOUR TASK:
+        1. Identify which specific Tool IDs from the INVENTORY match the user's request.
+        2. If the user says "Tekton tools", find ALL items with Brand "Tekton" or "Tekton" in the name.
+        3. Extract the new location (bin/shelf) and optional household.
         
         OUTPUT JSON:
         {{
             "updates": [
-                {{ "tool_name": "fuzzy name 1", "new_bin": "location", "new_household": "optional" }},
-                {{ "tool_name": "fuzzy name 2", "new_bin": "location", "new_household": "optional" }}
+                {{ "tool_id": "EXACT_ID_FROM_LIST", "new_bin": "New Location String", "new_household": "Infer or null" }},
+                {{ "tool_id": "NEXT_ID", "new_bin": "New Location String", "new_household": "Infer or null" }}
             ]
         }}
         """
         response = model.generate_content(prompt)
         clean_text = response.text.replace("```json", "").replace("```", "").strip()
         return json.loads(clean_text)
-    except:
+    except Exception as e:
         return None

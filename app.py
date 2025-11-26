@@ -300,41 +300,46 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
         # --- SECTION 1: SMART MOVER ---
         with st.container(border=True):
             st.subheader("📦 Quick Move")
-            st.info("Moved something? Just say it. (e.g. 'Moved drill and saw to shed')")
+            st.info("Moved something? Just say it. (e.g. 'Move all Tekton tools to the outdoor bin')")
             c_move_1, c_move_2 = st.columns([4, 1], vertical_alignment="bottom")
             with c_move_1:
                 move_query = st.text_input("Status Update:", placeholder="e.g. 'I moved the circular saw to the basement shelf'")
             with c_move_2:
                 if st.button("Update", use_container_width=True):
                     with st.spinner("Updating..."):
-                        move_data = parse_location_update(move_query)
+                        # 1. Get the user's tools FIRST
+                        my_tools_df = dm.get_my_tools(current_user['name'])
                         
-                        # UPDATED: Handle Multiple Updates
-                        if move_data and move_data.get('updates'):
-                            my_tools_df = dm.get_my_tools(current_user['name'])
-                            count = 0
-                            
-                            for update in move_data['updates']:
-                                # Fuzzy match for each tool in the list
-                                match = my_tools_df[my_tools_df['name'].str.contains(update['tool_name'], case=False)]
-                                if not match.empty:
-                                    tid = match.iloc[0]['id']
-                                    new_house = update.get('new_household') or match.iloc[0]['household']
-                                    new_bin = update.get('new_bin')
-                                    
-                                    dm.update_tool_location(tid, new_bin, new_house, current_user['name'])
-                                    count += 1
-                            
-                            if count > 0:
-                                st.success(f"✅ Updated locations for {count} tools!")
-                                time.sleep(2)
-                                st.rerun()
-                            else:
-                                st.warning("Couldn't match those tool names to your inventory.")
+                        if my_tools_df.empty:
+                            st.error("You don't have any tools to move!")
                         else:
-                            st.error("AI couldn't parse the move request.")
-
-        st.markdown("---")
+                            # 2. Pass inventory to AI so it can match Brands/Names to IDs
+                            from gemini_helper import parse_location_update
+                            move_data = parse_location_update(move_query, my_tools_df)
+                            
+                            if move_data and move_data.get('updates'):
+                                count = 0
+                                for update in move_data['updates']:
+                                    tid = update.get('tool_id')
+                                    
+                                    # verify ID exists in user's list (security check)
+                                    if tid in my_tools_df['id'].values:
+                                        # Get current household if AI didn't specify a new one
+                                        current_house = my_tools_df[my_tools_df['id'] == tid].iloc[0]['household']
+                                        new_house = update.get('new_household') or current_house
+                                        new_bin = update.get('new_bin')
+                                        
+                                        dm.update_tool_location(tid, new_bin, new_house, current_user['name'])
+                                        count += 1
+                                
+                                if count > 0:
+                                    st.success(f"✅ Moved {count} tools to **{move_data['updates'][0]['new_bin']}**!")
+                                    time.sleep(2)
+                                    st.rerun()
+                                else:
+                                    st.warning("AI identified tools, but IDs didn't match your registry.")
+                            else:
+                                st.error("Couldn't understand the move request.")
 
         # --- SECTION 2: SPREADSHEET EDITOR ---
         st.subheader("📝 Edit Details")
