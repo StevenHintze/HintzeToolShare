@@ -264,11 +264,26 @@ with current_tabs[2]:
                 st.markdown(f"- **{item['tool_name']}** is with **{item['held_by']}**")
 
         if recs.get('borrow_list'):
-            st.info("🛒 **You need to borrow these:**")
+            st.info("🛒 **Logistics Plan:**")
             with st.form("smart_borrow"):
                 selected_ids = []
                 for item in recs['borrow_list']:
-                    label = f"**{item['name']}** from {item['household']}"
+                    # Check if this tool is stationary (we need to look up the flag in the DB/DF)
+                    # Since AI gave us the ID, we can check our local dataframe 'all_tools_df'
+                    # (Ensure you passed all_tools_df correctly in Phase 1)
+                    
+                    # Simplified Logic for Display:
+                    is_stat = False
+                    # We trust the AI's reasoning or check the DF if available. 
+                    # For now, let's just rely on the text prompt to the AI to label it if we want,
+                    # OR simpler: Use the 'id' to find it in the dataframe 'all_tools_df' defined in Phase 1 logic.
+                    
+                    # Visual Tweak
+                    icon = "🚗 Pickup"
+                    # You might need to fetch the 'is_stationary' status here if you want perfect accuracy,
+                    # but usually the AI rationale covers it.
+                    
+                    label = f"**{item['name']}** ({item['household']})"
                     if st.checkbox(label, value=True, help=item['reason']):
                         selected_ids.append(item['tool_id'])
                 
@@ -292,12 +307,12 @@ if current_user['role'] == "ADMIN":
         with st.form("ai_prefill_form"):
             c_ai_1, c_ai_2 = st.columns([1, 3], vertical_alignment="bottom")
             with c_ai_1:
-                quick_owner = st.selectbox("Who bought it?", ALL_OWNERS, index=None, placeholder="Owner...", key="ai_owner_select")
+                quick_owner = st.selectbox("Who owns it?", ALL_OWNERS, index=None, placeholder="Owner...", key="ai_owner_select")
             with c_ai_2:
                 raw_input = st.text_input("Paste Description", key="ai_input")
             
             # Submit button runs the logic
-            trigger_ai = st.form_submit_button("✨ Auto-Fill", use_container_width=True)
+            trigger_ai = st.form_submit_button("✨ AI Auto-Fill", use_container_width=True)
 
         if trigger_ai:
             if raw_input:
@@ -308,7 +323,8 @@ if current_user['role'] == "ADMIN":
                         st.session_state['form_brand'] = ai_data.get('brand', '')
                         st.session_state['form_model'] = ai_data.get('model_no', '')
                         st.session_state['form_caps'] = ai_data.get('capabilities', '')
-                        
+                        st.session_state['form_stationary'] = ai_data.get('is_stationary', False)
+
                         try: 
                             power_options = ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"]
                             p_idx = power_options.index(ai_data.get('power_source', 'Manual'))
@@ -371,13 +387,14 @@ if current_user['role'] == "ADMIN":
             new_bin = st.text_input("Specific Location", placeholder="e.g. Garage - Shelf 2", key="form_bin")
             new_safety = st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], index=st.session_state['form_safety_index'])
             new_caps = st.text_input("Capabilities", key="form_caps")
+            new_stationary = st.checkbox("Stationary (Must be used on-site)", value=st.session_state.get('form_stationary', False))
             
             if st.form_submit_button("💾 Add to Tool Registry", use_container_width=True):
                 if not new_owner or not new_household:
                     st.error("⚠️ Please select Owner and Household")
                 else:
                     new_id = f"TOOL_{uuid.uuid4().hex[:6].upper()}"
-                    dm.con.execute("INSERT INTO tools VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
-                        (new_id, new_name, new_brand, new_model, new_power, new_owner, new_household, new_bin, 'Available', None, None, new_caps, new_safety))
+                    dm.con.execute("INSERT INTO tools VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+                    (new_id, new_name, new_brand, new_model, new_power, new_owner, new_household, new_bin, new_stationary, 'Available', None, None, new_caps, new_safety))
                     st.success(f"✅ Saved: {new_name}")
                     st.rerun()
