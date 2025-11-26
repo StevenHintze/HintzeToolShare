@@ -84,8 +84,8 @@ if st.sidebar.button("Log Out"):
 
 # Tabs
 tabs = ["Borrow Tools", "Return Tools", "🤖 Tool Manager"]
-if current_user['role'] == "ADMIN":
-    tabs.append("🔐 Admin")
+if current_user['role'] in ["ADMIN", "ADULT"]:
+    tabs.append("🔐 Manage")
 
 current_tabs = st.tabs(tabs)
 
@@ -292,48 +292,96 @@ with current_tabs[2]:
                     st.session_state["ai_recs"] = None
                     st.rerun()
 
-# TAB 4: Manage My Tools (Available to Admin & Adults)
+# TAB 4: Manage Inventory
 if current_user['role'] in ["ADMIN", "ADULT"]:
     with current_tabs[3]:
         st.header(f"Manage {current_user['name']}'s Inventory")
         
-        # --- SECTION 1: SMART MOVER (Voice-to-Action style) ---
+        # --- SECTION 1: SMART MOVER ---
         with st.container(border=True):
             st.subheader("📦 Quick Move")
-            move_query = st.text_input("Did you reorganize?", placeholder="e.g. 'I moved the circular saw to the basement shelf'")
-            if st.button("Update Location"):
-                with st.spinner("Updating..."):
-                    move_data = ai_parse_tool_location_update(move_query) # You need to import this or rename the helper function
-                    # NOTE: I renamed the helper function in Step 2 to `parse_location_update`. 
-                    # Let's assume you imported it as `parse_location_update`
-                    from gemini_helper import parse_location_update
-                    move_data = parse_location_update(move_query)
-                    
-                    if move_data and move_data.get('tool_name'):
-                        # Find the tool in DB
-                        # We allow matching ANY tool owned by this user
-                        my_tools_df = dm.get_my_tools(current_user['name'])
+            st.info("Moved something? Just say it.")
+            c_move_1, c_move_2 = st.columns([4, 1], vertical_alignment="bottom")
+            with c_move_1:
+                move_query = st.text_input("Status Update:", placeholder="e.g. 'I moved the circular saw to the basement shelf'")
+            with c_move_2:
+                if st.button("Update", use_container_width=True):
+                    with st.spinner("Updating..."):
+                        from gemini_helper import parse_location_update
+                        move_data = parse_location_update(move_query)
                         
-                        # Simple fuzzy match logic (Case insensitive)
-                        match = my_tools_df[my_tools_df['name'].str.contains(move_data['tool_name'], case=False)]
-                        
-                        if not match.empty:
-                            # Pick first match
-                            tid = match.iloc[0]['id']
-                            tname = match.iloc[0]['name']
+                        if move_data and move_data.get('tool_name'):
+                            # Match tool owned by user
+                            my_tools_df = dm.get_my_tools(current_user['name'])
+                            match = my_tools_df[my_tools_df['name'].str.contains(move_data['tool_name'], case=False)]
                             
-                            # Determine household (Keep existing if AI didn't find one)
-                            new_house = move_data.get('new_household') or match.iloc[0]['household']
-                            new_bin = move_data.get('new_bin')
-                            
-                            dm.update_tool_location(tid, new_bin, new_house, current_user['name'])
-                            st.success(f"✅ Moved **{tname}** to **{new_bin}**")
-                            time.sleep(2)
-                            st.rerun()
-                        else:
-                            st.error(f"Couldn't find a tool matching '{move_data['tool_name']}' that you own.")
+                            if not match.empty:
+                                tid = match.iloc[0]['id']
+                                tname = match.iloc[0]['name']
+                                new_house = move_data.get('new_household') or match.iloc[0]['household']
+                                new_bin = move_data.get('new_bin')
+                                
+                                dm.update_tool_location(tid, new_bin, new_house, current_user['name'])
+                                st.success(f"✅ Moved **{tname}** to **{new_bin}**")
+                                time.sleep(2)
+                                st.rerun()
+                            else:
+                                st.error(f"Couldn't find a tool matching '{move_data['tool_name']}' that you own.")
+
+        st.markdown("---")
+
+        # --- SECTION 2: SPREADSHEET EDITOR ---
+        st.subheader("📝 Edit Details")
         
-        st.write("")
+        # Admin sees all, Adult sees own
+        if current_user['role'] == "ADMIN":
+            edit_df = dm.con.execute("SELECT * FROM tools").df()
+            st.caption("Admin Mode: Editing ALL tools.")
+        else:
+            edit_df = dm.get_my_tools(current_user['name'])
+            st.caption("Editing ONLY tools you own.")
+
+        edited_tools = st.data_editor(
+            edit_df,
+            column_config={
+                "id": st.column_config.TextColumn(disabled=True),
+                "status": st.column_config.TextColumn(disabled=True),
+                "borrower": st.column_config.TextColumn(disabled=True),
+                "return_date": st.column_config.TextColumn(disabled=True),
+                "owner": st.column_config.SelectboxColumn(options=ALL_OWNERS, required=True),
+                "household": st.column_config.SelectboxColumn(options=ALL_HOUSEHOLDS, required=True),
+                "safety_rating": st.column_config.SelectboxColumn(options=["Open", "Supervised", "Adult Only"]),
+            },
+            hide_index=True,
+            key="tool_editor"
+        )
+
+        if st.button("💾 Save Changes"):
+            dm.batch_update_tools(edited_tools, current_user['name'])
+            st.success("Inventory updated!")
+            st.rerun()
+
+        # --- SECTION 3: HISTORY ---
+        with st.expander("📜 View History / Audit Trail"):
+            hist_tool_name = st.selectbox("Select tool to view history:", edit_df['name'])
+            if hist_tool_name:
+                hist_tid = edit_df[edit_df['name'] == hist_tool_name].iloc[0]['id']
+                history = dm.get_tool_history(hist_tid)
+                if not history.empty:
+                    st.dataframe(history)
+                else:
+                    st.write("No history found.")
+
+        # --- SECTION 4: ADD NEW (Admin Only) ---
+        if current_user['role'] == "ADMIN":
+            st.markdown("---")
+            st.subheader("Add New Tool")
+            
+            # ... (Paste your previous AI Scan + Form code here from Tab 4) ...
+            # ... (Ensure you un-indent it correctly to fit this block) ...
+            # Or, for cleanliness, you can keep the Add Tool logic here. 
+            # Copy the 'AI Helper' and 'Review & Save' blocks from your PREVIOUS version 
+            # and paste them here indented under `if current_user['role'] == "ADMIN":`
 
         # --- SECTION 2: SPREADSHEET EDITOR ---
         st.subheader("📝 Edit Details")
