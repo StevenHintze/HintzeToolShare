@@ -189,3 +189,29 @@ def ai_parse_tool(raw_text):
         return json.loads(clean_text)
     except Exception as e:
         return None
+
+def parse_location_update(user_query):
+    """
+    Extracts tool name and new location from natural language.
+    """
+    try:
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        
+        prompt = f"""
+        Extract the TARGET TOOL and NEW LOCATION from this text.
+        
+        TEXT: "{user_query}"
+        
+        OUTPUT JSON:
+        {{
+            "tool_name": "fuzzy match name",
+            "new_bin": "Specific shelf/bin/box",
+            "new_household": "Infer household if mentioned, else null"
+        }}
+        """
+        response = model.generate_content(prompt)
+        clean_text = response.text.replace("```json", "").replace("```", "").strip()
+        return json.loads(clean_text)
+    except:
+        return None
