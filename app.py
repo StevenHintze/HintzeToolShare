@@ -287,64 +287,84 @@ if current_user['role'] == "ADMIN":
     with current_tabs[3]:
         st.header("Add New Tool")
         
-        col_ai_1, col_ai_2, col_ai_3 = st.columns([1, 2, 1])
+        st.markdown("### 🤖 Step 1: Scan Tool")
+        st.info("Select the owner, paste the description, and click Auto-Fill.")
+        
+        # UI FIX: Adjust column ratios and force bottom alignment
+        # This ensures the button lines up perfectly with the inputs
+        col_ai_1, col_ai_2, col_ai_3 = st.columns([1, 3, 1], vertical_alignment="bottom")
+        
         with col_ai_1:
-            quick_owner = st.selectbox("Who bought it?", ALL_OWNERS, index=None, placeholder="Select owner...", key="ai_owner_select")
+            # Shortened label to save space
+            quick_owner = st.selectbox("Owner", ALL_OWNERS, index=None, placeholder="Who?", key="ai_owner_select")
+            
         with col_ai_2:
-            raw_input = st.text_input("Paste Description", key="ai_input", label_visibility="collapsed")
+            # Removed 'collapsed' label visibility so it aligns with the first box
+            raw_input = st.text_input("Paste Description", placeholder="e.g. DeWalt 20V Max...", key="ai_input")
+            
         with col_ai_3:
-            if st.button("✨ Auto-Fill", use_container_width=True):
-                if raw_input:
-                    with st.spinner("Analyzing..."):
-                        ai_data = ai_parse_tool(raw_input)
-                        if ai_data:
-                            st.session_state['form_name'] = ai_data.get('name', '')
-                            st.session_state['form_brand'] = ai_data.get('brand', '')
-                            st.session_state['form_model'] = ai_data.get('model_no', '')
-                            st.session_state['form_caps'] = ai_data.get('capabilities', '')
-                            
-                            try: 
-                                p_idx = ["Manual", "Corded", "Battery", "Gas"].index(ai_data.get('power_source', 'Manual'))
-                                st.session_state['form_power_idx'] = p_idx
-                            except: 
-                                st.session_state['form_power_idx'] = 0
+            # Button matches width of the column
+            trigger_ai = st.button("✨ Auto-Fill", use_container_width=True)
 
-                            try:
-                                st.session_state['form_safety_index'] = ["Open", "Supervised", "Adult Only"].index(ai_data.get('safety', 'Open'))
-                            except:
-                                st.session_state['form_safety_index'] = 0
-                            
-                            if quick_owner:
-                                st.session_state['form_owner'] = quick_owner
-                                st.session_state['form_household'] = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0])
-                            
-                            st.success("✅ AI Generated Details - Please Check for Accuracy.")
-                        else:
-                            st.error("AI could not generate details from description.")
+        # UI FIX: Handle Logic OUTSIDE the columns
+        # This prevents the error message from squishing into the button column
+        if trigger_ai:
+            if not raw_input:
+                st.error("⚠️ Please paste a description above.")
             else:
-                st.error("Please paste a description.")
+                with st.spinner("Analyzing..."):
+                    ai_data = ai_parse_tool(raw_input)
+                    if ai_data:
+                        # Fill Session State
+                        st.session_state['form_name'] = ai_data.get('name', '')
+                        st.session_state['form_brand'] = ai_data.get('brand', '')
+                        st.session_state['form_model'] = ai_data.get('model_no', '')
+                        st.session_state['form_caps'] = ai_data.get('capabilities', '')
+                        
+                        try: 
+                            p_idx = ["Manual", "Corded", "Battery", "Gas"].index(ai_data.get('power_source', 'Manual'))
+                            st.session_state['form_power_idx'] = p_idx
+                        except: 
+                            st.session_state['form_power_idx'] = 0
+
+                        try:
+                            st.session_state['form_safety_index'] = ["Open", "Supervised", "Adult Only"].index(ai_data.get('safety', 'Open'))
+                        except:
+                            st.session_state['form_safety_index'] = 0
+                        
+                        if quick_owner:
+                            st.session_state['form_owner'] = quick_owner
+                            st.session_state['form_household'] = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0])
+                        
+                        st.success("✅ AI Generated Details - Please Check for Accuracy.")
+                    else:
+                        st.error("AI could not generate details from description.")
 
         st.markdown("---")
         st.markdown("### 📝 Step 2: Review & Save")
         
         with st.form("add_tool"):
-            if 'form_name' not in st.session_state: st.session_state['form_name'] = ""
-            if 'form_brand' not in st.session_state: st.session_state['form_brand'] = ""
-            if 'form_model' not in st.session_state: st.session_state['form_model'] = ""
-            if 'form_caps' not in st.session_state: st.session_state['form_caps'] = ""
+            # Ensure keys exist
+            keys = ['form_name', 'form_brand', 'form_model', 'form_caps']
+            for k in keys:
+                if k not in st.session_state: st.session_state[k] = ""
+            
             if 'form_safety_index' not in st.session_state: st.session_state['form_safety_index'] = 0
             if 'form_power_idx' not in st.session_state: st.session_state['form_power_idx'] = 0
             
-            owner_idx = None
+            # Indexes for Selectboxes
+            owner_idx = 0
             if 'form_owner' in st.session_state and st.session_state['form_owner'] in ALL_OWNERS:
                  owner_idx = ALL_OWNERS.index(st.session_state['form_owner'])
             
-            house_idx = None
+            house_idx = 0
             if 'form_household' in st.session_state and st.session_state['form_household'] in ALL_HOUSEHOLDS:
                  house_idx = ALL_HOUSEHOLDS.index(st.session_state['form_household'])
 
+            # Form Row 1
             new_name = st.text_input("Tool Name", key="form_name")
             
+            # Form Row 2
             c1, c2, c3 = st.columns(3)
             with c1:
                 new_brand = st.text_input("Brand", key="form_brand")
@@ -353,6 +373,7 @@ if current_user['role'] == "ADMIN":
             with c3:
                 new_power = st.selectbox("Power", ["Manual", "Corded", "Battery", "Gas"], index=st.session_state['form_power_idx'])
 
+            # Form Row 3
             c4, c5 = st.columns(2)
             with c4:
                 new_owner = st.selectbox("Owner", ALL_OWNERS, index=owner_idx, placeholder="Select owner...")
@@ -360,6 +381,7 @@ if current_user['role'] == "ADMIN":
                 new_household = st.selectbox("Location", ALL_HOUSEHOLDS, index=house_idx, placeholder="Select household...")
 
             new_bin = st.text_input("Specific Location", placeholder="e.g. Garage - Shelf 2", key="form_bin")
+            
             new_safety = st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], index=st.session_state['form_safety_index'])
             new_caps = st.text_input("Capabilities", key="form_caps")
             
@@ -367,6 +389,7 @@ if current_user['role'] == "ADMIN":
                 if not new_owner or not new_household:
                     st.error("⚠️ Please select Owner and Household")
                 else:
+                    import random
                     new_id = f"TOOL_{uuid.uuid4().hex[:6].upper()}"
                     dm.con.execute("INSERT INTO tools VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
                         (new_id, new_name, new_brand, new_model, new_power, new_owner, new_household, new_bin, 'Available', None, None, new_caps, new_safety))
