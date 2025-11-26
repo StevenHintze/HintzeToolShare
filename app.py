@@ -8,7 +8,7 @@ import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.11", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.12", page_icon="🛠️")
 
 # Initialize DB
 dm = DataManager()
@@ -28,7 +28,7 @@ except:
     ALL_OWNERS = ["Admin"]
     ALL_HOUSEHOLDS = ["Main House"]
 
-# --- AUTHENTICATION LOGIC ---
+# --- AUTHENTICATION ---
 if "user_info" not in st.session_state:
     st.session_state["user_info"] = None
 
@@ -91,17 +91,18 @@ current_tabs = st.tabs(tabs)
 
 # TAB 1: Inventory & Courier
 with current_tabs[0]:
-    st.header("Global Inventory")
+    # FIX 1: Updated Header
+    st.header("Family Inventory")
     
-    # 1. Search Interface
-    c1, c2 = st.columns([3, 1])
+    # FIX 2: Better alignment for Search + Toggle
+    # [5, 1] gives the text box more room, 'bottom' aligns the toggle with the text box
+    c1, c2 = st.columns([5, 1], vertical_alignment="bottom")
     with c1:
         query = st.text_input("🔎 Search or Ask...", placeholder="e.g. 'Automotive tools' or 'What has Shawn borrowed?'")
     with c2:
-        st.write("")
-        use_ai = st.toggle("Use AI Search", value=False)
+        use_ai = st.toggle("AI Search", value=False)
 
-    # 2. Filter Logic
+    # Filter Logic
     all_tools = dm.con.execute("SELECT * FROM tools").df()
     filtered_df = all_tools
     
@@ -111,7 +112,6 @@ with current_tabs[0]:
                 match_ids = ai_filter_inventory(query, all_tools)
                 filtered_df = all_tools[all_tools['id'].isin(match_ids)]
         else:
-            # Standard text search
             mask = (
                 all_tools['name'].str.contains(query, case=False, na=False) | 
                 all_tools['brand'].str.contains(query, case=False, na=False) |
@@ -119,7 +119,7 @@ with current_tabs[0]:
             )
             filtered_df = all_tools[mask]
 
-    # 3. Display Inventory
+    # Display Inventory
     filtered_df['Location Info'] = filtered_df['household'] + " (" + filtered_df['bin_location'] + ")"
     
     def get_status_display(row):
@@ -139,7 +139,7 @@ with current_tabs[0]:
 
     st.markdown("---")
 
-    # 4. Manual Borrowing (Transactions)
+    # Manual Borrowing
     st.subheader("⚡ Quick Borrow")
     available_only = all_tools[all_tools['status'] == 'Available']
     
@@ -158,10 +158,8 @@ with current_tabs[0]:
                     dm.borrow_tool(tool_row['id'], current_user['name'], days)
                     st.success(f"✅ You borrowed the {target_tool_name}!")
                     
-                    # --- COURIER LOGIC ---
+                    # Courier Logic
                     pickup_household = tool_row['household']
-                    
-                    # Who lives there?
                     resident_name = None
                     for owner, house in OWNER_HOMES.items():
                         if house == pickup_household:
@@ -169,7 +167,6 @@ with current_tabs[0]:
                             break
                     
                     if resident_name:
-                        # Find tools borrowed by that resident that belong to others
                         courier_candidates = all_tools[
                             (all_tools['borrower'] == resident_name) & 
                             (all_tools['status'] == 'Borrowed')
@@ -232,13 +229,14 @@ with current_tabs[1]:
 
 # TAB 3: Smart Tool Manager
 with current_tabs[2]:
-    st.header("🤖 Smart Project Planner")
+    st.header("Ask the Tool Manager")
     
     if "ai_recs" not in st.session_state:
         st.session_state["ai_recs"] = None
 
     if st.session_state["ai_recs"] is None:
-        st.info(f"Planning a project? I'll check {current_user['household']} first, then look for loans.")
+        # FIX 3: Updated text
+        st.info(f"Planning a project? I'll check your household first, then look for loans.")
         project_query = st.text_area("Describe your project:", placeholder="e.g. I need to sand and stain the deck...")
         
         if st.button("Analyze Needs"):
@@ -290,32 +288,22 @@ if current_user['role'] == "ADMIN":
         st.markdown("### 🤖 Step 1: Scan Tool")
         st.info("Select the owner, paste the description, and click Auto-Fill.")
         
-        # UI FIX: Adjust column ratios and force bottom alignment
-        # This ensures the button lines up perfectly with the inputs
-        col_ai_1, col_ai_2, col_ai_3 = st.columns([1, 3, 1], vertical_alignment="bottom")
-        
-        with col_ai_1:
-            # Shortened label to save space
-            quick_owner = st.selectbox("Owner", ALL_OWNERS, index=None, placeholder="Who?", key="ai_owner_select")
+        # FIX 4 & 5: Wrapped in Form for Enter Key support and better layout
+        with st.form("ai_prefill_form"):
+            c_ai_1, c_ai_2 = st.columns([1, 3], vertical_alignment="bottom")
+            with c_ai_1:
+                quick_owner = st.selectbox("Who bought it?", ALL_OWNERS, index=None, placeholder="Owner...", key="ai_owner_select")
+            with c_ai_2:
+                raw_input = st.text_input("Paste Description", key="ai_input")
             
-        with col_ai_2:
-            # Removed 'collapsed' label visibility so it aligns with the first box
-            raw_input = st.text_input("Paste Description", placeholder="e.g. DeWalt 20V Max...", key="ai_input")
-            
-        with col_ai_3:
-            # Button matches width of the column
-            trigger_ai = st.button("✨ Auto-Fill", use_container_width=True)
+            # Submit button runs the logic
+            trigger_ai = st.form_submit_button("✨ Auto-Fill", use_container_width=True)
 
-        # UI FIX: Handle Logic OUTSIDE the columns
-        # This prevents the error message from squishing into the button column
         if trigger_ai:
-            if not raw_input:
-                st.error("⚠️ Please paste a description above.")
-            else:
+            if raw_input:
                 with st.spinner("Analyzing..."):
                     ai_data = ai_parse_tool(raw_input)
                     if ai_data:
-                        # Fill Session State
                         st.session_state['form_name'] = ai_data.get('name', '')
                         st.session_state['form_brand'] = ai_data.get('brand', '')
                         st.session_state['form_model'] = ai_data.get('model_no', '')
@@ -337,22 +325,23 @@ if current_user['role'] == "ADMIN":
                             st.session_state['form_household'] = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0])
                         
                         st.success("✅ AI Generated Details - Please Check for Accuracy.")
+                        st.rerun() # Rerun to populate Step 2 fields immediately
                     else:
                         st.error("AI could not generate details from description.")
+            else:
+                st.error("Please paste a description.")
 
         st.markdown("---")
         st.markdown("### 📝 Step 2: Review & Save")
         
         with st.form("add_tool"):
-            # Ensure keys exist
-            keys = ['form_name', 'form_brand', 'form_model', 'form_caps']
-            for k in keys:
-                if k not in st.session_state: st.session_state[k] = ""
-            
+            if 'form_name' not in st.session_state: st.session_state['form_name'] = ""
+            if 'form_brand' not in st.session_state: st.session_state['form_brand'] = ""
+            if 'form_model' not in st.session_state: st.session_state['form_model'] = ""
+            if 'form_caps' not in st.session_state: st.session_state['form_caps'] = ""
             if 'form_safety_index' not in st.session_state: st.session_state['form_safety_index'] = 0
             if 'form_power_idx' not in st.session_state: st.session_state['form_power_idx'] = 0
             
-            # Indexes for Selectboxes
             owner_idx = 0
             if 'form_owner' in st.session_state and st.session_state['form_owner'] in ALL_OWNERS:
                  owner_idx = ALL_OWNERS.index(st.session_state['form_owner'])
@@ -361,10 +350,8 @@ if current_user['role'] == "ADMIN":
             if 'form_household' in st.session_state and st.session_state['form_household'] in ALL_HOUSEHOLDS:
                  house_idx = ALL_HOUSEHOLDS.index(st.session_state['form_household'])
 
-            # Form Row 1
             new_name = st.text_input("Tool Name", key="form_name")
             
-            # Form Row 2
             c1, c2, c3 = st.columns(3)
             with c1:
                 new_brand = st.text_input("Brand", key="form_brand")
@@ -373,7 +360,6 @@ if current_user['role'] == "ADMIN":
             with c3:
                 new_power = st.selectbox("Power", ["Manual", "Corded", "Battery", "Gas"], index=st.session_state['form_power_idx'])
 
-            # Form Row 3
             c4, c5 = st.columns(2)
             with c4:
                 new_owner = st.selectbox("Owner", ALL_OWNERS, index=owner_idx, placeholder="Select owner...")
@@ -381,7 +367,6 @@ if current_user['role'] == "ADMIN":
                 new_household = st.selectbox("Location", ALL_HOUSEHOLDS, index=house_idx, placeholder="Select household...")
 
             new_bin = st.text_input("Specific Location", placeholder="e.g. Garage - Shelf 2", key="form_bin")
-            
             new_safety = st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], index=st.session_state['form_safety_index'])
             new_caps = st.text_input("Capabilities", key="form_caps")
             
@@ -389,7 +374,6 @@ if current_user['role'] == "ADMIN":
                 if not new_owner or not new_household:
                     st.error("⚠️ Please select Owner and Household")
                 else:
-                    import random
                     new_id = f"TOOL_{uuid.uuid4().hex[:6].upper()}"
                     dm.con.execute("INSERT INTO tools VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
                         (new_id, new_name, new_brand, new_model, new_power, new_owner, new_household, new_bin, 'Available', None, None, new_caps, new_safety))
