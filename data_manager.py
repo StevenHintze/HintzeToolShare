@@ -181,3 +181,24 @@ class DataManager:
             SET status = 'Retired', bin_location = ? 
             WHERE id = ?
         """, [f"Retired: {reason}", tool_id])
+
+def purge_old_history(self, days=30):
+        """
+        Deletes tool history records older than 'days'.
+        Returns the number of records deleted.
+        """
+        # 1. Count them first (for the UI notification)
+        count = self.con.execute(f"""
+            SELECT count(*) 
+            FROM tool_history 
+            WHERE change_date < current_timestamp - INTERVAL '{days} days'
+        """).fetchone()[0]
+        
+        # 2. Delete them
+        if count > 0:
+            self.con.execute(f"""
+                DELETE FROM tool_history 
+                WHERE change_date < current_timestamp - INTERVAL '{days} days'
+            """)
+            
+        return count

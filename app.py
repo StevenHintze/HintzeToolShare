@@ -596,3 +596,21 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                         )
                         time.sleep(1)
                         st.rerun()
+        st.markdown("---")
+        
+        # --- SECTION 5: MAINTENANCE ---
+        with st.expander("⚙️ Database Maintenance"):
+            st.caption("Keep the database lean by removing old audit logs.")
+            
+            col_m1, col_m2 = st.columns([3, 1], vertical_alignment="bottom")
+            with col_m1:
+                st.write("**Purge Old History:** Removes audit trails older than 30 days.")
+            with col_m2:
+                if st.button("🧹 Purge Now", use_container_width=True):
+                    with st.spinner("Cleaning up..."):
+                        deleted_count = dm.purge_old_history(days=30)
+                        time.sleep(1)
+                        if deleted_count > 0:
+                            st.toast(f"Cleanup Complete: Removed {deleted_count} old records.", icon="🗑️")
+                        else:
+                            st.toast("Database is already clean.", icon="✨")
