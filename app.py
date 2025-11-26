@@ -6,7 +6,7 @@ from gemini_helper import ai_parse_tool, get_ai_advice, get_smart_recommendation
 import time
 import datetime
 import uuid
-import pandas as pd # <--- CRITICAL FIX: Added this back
+import pandas as pd
 
 st.set_page_config(page_title="HFTS v0.9.13", page_icon="🛠️")
 
@@ -118,7 +118,14 @@ with current_tabs[0]:
             filtered_df = all_tools[mask]
 
     # Display Inventory
-    filtered_df['Location Info'] = filtered_df['household'] + " (" + filtered_df['bin_location'] + ")"
+    # FIX 1: Visually mark stationary items
+    def format_location(row):
+        loc = f"{row['household']} ({row['bin_location']})"
+        if row.get('is_stationary'):
+            loc += " ⚓ [Fixed]"
+        return loc
+
+    filtered_df['Location Info'] = filtered_df.apply(format_location, axis=1)
     
     def get_status_display(row):
         if row['status'] == 'Borrowed':
@@ -139,7 +146,13 @@ with current_tabs[0]:
 
     # Manual Borrowing
     st.subheader("⚡ Quick Borrow")
-    available_only = all_tools[all_tools['status'] == 'Available']
+    
+    # FIX 2: Filter out Stationary tools from the dropdown
+    # We use .fillna(False) to handle any old data that might be null
+    available_only = all_tools[
+        (all_tools['status'] == 'Available') & 
+        (all_tools['is_stationary'] != True) 
+    ]
     
     if not available_only.empty:
         with st.form("manual_borrow"):
@@ -149,7 +162,7 @@ with current_tabs[0]:
             with col_b2:
                 days = st.number_input("Days", min_value=1, value=7)
             
-            if st.form_submit_button("Confirm Borrow"):
+            if st.form_submit_button("Confirm Borrowed"):
                 tool_row = available_only[available_only['name'] == target_tool_name].iloc[0]
                 
                 if check_safety(current_user['role'], tool_row['safety_rating']):
@@ -181,6 +194,8 @@ with current_tabs[0]:
                     st.rerun()
                 else:
                     st.error("🚫 Safety Restriction.")
+    else:
+        st.info("No transportable tools available right now.")
 
 # TAB 2: My Workbench
 with current_tabs[1]:
@@ -225,7 +240,7 @@ with current_tabs[1]:
     else:
         st.success("All your tools are safe at home.")
 
-# TAB 3: Tool Manager
+# TAB 3: Smart Tool Manager
 with current_tabs[2]:
     st.header("Ask the Tool Manager")
     
@@ -233,7 +248,7 @@ with current_tabs[2]:
         st.session_state["ai_recs"] = None
 
     if st.session_state["ai_recs"] is None:
-        st.info(f"Planning a project? I'll check {current_user['household']} first, then look for loans.")
+        st.info(f"Planning a project? I'll check your household first, then look for loans.")
         project_query = st.text_area("Describe your project:", placeholder="e.g. I need to sand and stain the deck...")
         
         if st.button("Analyze Needs"):
@@ -261,7 +276,7 @@ with current_tabs[2]:
                 st.markdown(f"- **{item['tool_name']}** is with **{item['held_by']}**")
 
         if recs.get('borrow_list'):
-            st.info("🛒 **You need to borrow these:**")
+            st.info("🛒 **Logistics Plan:**")
             with st.form("smart_borrow"):
                 selected_ids = []
                 for item in recs['borrow_list']:
@@ -282,10 +297,11 @@ if current_user['role'] == "ADMIN":
     with current_tabs[3]:
         st.header("Add New Tool")
         
+        # --- SECTION 1: AI HELPER ---
         st.markdown("### 🤖 Step 1: Scan Tool")
         st.info("Select the owner, paste the description, and click Auto-Fill.")
         
-        # FIX 2: Wrapped in Form so Enter key works + Alignment
+        # Wrapped in Form for Enter Key support
         with st.form("ai_prefill_form"):
             c_ai_1, c_ai_2 = st.columns([1, 3], vertical_alignment="bottom")
             with c_ai_1:
@@ -293,7 +309,7 @@ if current_user['role'] == "ADMIN":
             with c_ai_2:
                 raw_input = st.text_input("Paste Description", key="ai_input")
             
-            trigger_ai = st.form_submit_button("✨ AI Auto-Fill", use_container_width=True)
+            trigger_ai = st.form_submit_button("✨ Auto-Fill", use_container_width=True)
 
         if trigger_ai:
             if raw_input:
@@ -322,7 +338,7 @@ if current_user['role'] == "ADMIN":
                             st.session_state['form_household'] = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0])
                         
                         st.success("✅ AI Generated Details - Please Check for Accuracy.")
-                        st.rerun() 
+                        st.rerun()
                     else:
                         st.error("AI could not generate details from description.")
             else:
@@ -332,12 +348,10 @@ if current_user['role'] == "ADMIN":
         st.markdown("### 📝 Step 2: Review & Save")
         
         with st.form("add_tool"):
-            # Init Session State
             if 'form_name' not in st.session_state: st.session_state['form_name'] = ""
             if 'form_brand' not in st.session_state: st.session_state['form_brand'] = ""
             if 'form_model' not in st.session_state: st.session_state['form_model'] = ""
             if 'form_caps' not in st.session_state: st.session_state['form_caps'] = ""
-            if 'form_stationary' not in st.session_state: st.session_state['form_stationary'] = False
             if 'form_safety_index' not in st.session_state: st.session_state['form_safety_index'] = 0
             if 'form_power_idx' not in st.session_state: st.session_state['form_power_idx'] = 0
             
@@ -367,7 +381,7 @@ if current_user['role'] == "ADMIN":
 
             new_bin = st.text_input("Specific Location", placeholder="e.g. Garage - Shelf 2", key="form_bin")
             
-            new_stationary = st.checkbox("Stationary Tool (Must be used on-site)", key="form_stationary")
+            new_stationary = st.checkbox("Stationary Tool (Must be used on-site)", value=st.session_state.get('form_stationary', False))
 
             new_safety = st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], index=st.session_state['form_safety_index'])
             new_caps = st.text_input("Capabilities", key="form_caps")
