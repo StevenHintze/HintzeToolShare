@@ -192,22 +192,24 @@ def ai_parse_tool(raw_text):
 
 def parse_location_update(user_query):
     """
-    Extracts tool name and new location from natural language.
+    Extracts MULTIPLE tool names and locations from natural language.
     """
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         model = genai.GenerativeModel('gemini-2.5-flash')
         
         prompt = f"""
-        Extract the TARGET TOOL and NEW LOCATION from this text.
+        Extract TARGET TOOLS and NEW LOCATIONS from this text.
+        Handle lists (e.g. "Moved drill, saw, and hammer to shed").
         
         TEXT: "{user_query}"
         
         OUTPUT JSON:
         {{
-            "tool_name": "fuzzy match name",
-            "new_bin": "Specific shelf/bin/box",
-            "new_household": "Infer household if mentioned, else null"
+            "updates": [
+                {{ "tool_name": "fuzzy name 1", "new_bin": "location", "new_household": "optional" }},
+                {{ "tool_name": "fuzzy name 2", "new_bin": "location", "new_household": "optional" }}
+            ]
         }}
         """
         response = model.generate_content(prompt)

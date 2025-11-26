@@ -8,7 +8,7 @@ import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.14", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.16", page_icon="🛠️")
 
 # Initialize DB
 dm = DataManager()
@@ -66,6 +66,14 @@ if st.session_state["user_info"] is None:
         login()
     st.stop()
 
+# --- HELPER: CLEAR FORM CALLBACK ---
+def clear_admin_form():
+    """Resets all admin form session state keys"""
+    keys = ['form_name', 'form_brand', 'form_model', 'form_caps', 'form_bin', 'form_power_idx', 'form_safety_index', 'ai_input']
+    for k in keys:
+        if k in st.session_state:
+            del st.session_state[k] # Deleting causes Streamlit to re-init them to empty on next run
+
 # --- APP STARTS HERE ---
 current_user = st.session_state["user_info"]
 st.title(f"🛠️ Hintze Family Tool Share")
@@ -82,8 +90,8 @@ if st.sidebar.button("Log Out"):
     time.sleep(1) 
     st.rerun()
 
-# Tabs
-tabs = ["Borrow Tools", "Return Tools", "🤖 Tool Manager"]
+# Tabs (Renamed Tab 1)
+tabs = ["Inventory", "Return Tools", "🤖 Tool Manager"]
 if current_user['role'] in ["ADMIN", "ADULT"]:
     tabs.append("🔐 Manage")
 
@@ -97,7 +105,8 @@ with current_tabs[0]:
     with c1:
         query = st.text_input("🔎 Search or Ask...", placeholder="e.g. 'Automotive tools' or 'What has Shawn borrowed?'")
     with c2:
-        use_ai = st.toggle("AI Search", value=False)
+        # UPDATED: Default value is True
+        use_ai = st.toggle("AI Search", value=True)
 
     all_tools = dm.con.execute("SELECT * FROM tools").df()
     filtered_df = all_tools
@@ -141,7 +150,6 @@ with current_tabs[0]:
     st.markdown("---")
 
     st.subheader("⚡ Quick Borrow")
-    # Filter out stationary items from quick borrow
     available_only = all_tools[
         (all_tools['status'] == 'Available') & 
         (all_tools['is_stationary'] != True) 
@@ -240,7 +248,7 @@ with current_tabs[2]:
         st.session_state["ai_recs"] = None
 
     if st.session_state["ai_recs"] is None:
-        st.info(f"Planning a project? I'll check {current_user['household']} first, then look for loans.")
+        st.info(f"Planning a project? I'll check your household first, then look for loans.")
         project_query = st.text_area("Describe your project:", placeholder="e.g. I need to sand and stain the deck...")
         
         if st.button("Analyze Needs"):
@@ -284,7 +292,7 @@ with current_tabs[2]:
                     st.session_state["ai_recs"] = None
                     st.rerun()
 
-# TAB 4: Manage My Tools (Admin & Adults)
+# TAB 4: Manage Inventory (Admin & Adult)
 if current_user['role'] in ["ADMIN", "ADULT"]:
     with current_tabs[3]:
         st.header(f"Manage {current_user['name']}'s Inventory")
@@ -292,7 +300,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
         # --- SECTION 1: SMART MOVER ---
         with st.container(border=True):
             st.subheader("📦 Quick Move")
-            st.info("Moved something? Just say it.")
+            st.info("Moved something? Just say it. (e.g. 'Moved drill and saw to shed')")
             c_move_1, c_move_2 = st.columns([4, 1], vertical_alignment="bottom")
             with c_move_1:
                 move_query = st.text_input("Status Update:", placeholder="e.g. 'I moved the circular saw to the basement shelf'")
@@ -301,22 +309,30 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     with st.spinner("Updating..."):
                         move_data = parse_location_update(move_query)
                         
-                        if move_data and move_data.get('tool_name'):
+                        # UPDATED: Handle Multiple Updates
+                        if move_data and move_data.get('updates'):
                             my_tools_df = dm.get_my_tools(current_user['name'])
-                            match = my_tools_df[my_tools_df['name'].str.contains(move_data['tool_name'], case=False)]
+                            count = 0
                             
-                            if not match.empty:
-                                tid = match.iloc[0]['id']
-                                tname = match.iloc[0]['name']
-                                new_house = move_data.get('new_household') or match.iloc[0]['household']
-                                new_bin = move_data.get('new_bin')
-                                
-                                dm.update_tool_location(tid, new_bin, new_house, current_user['name'])
-                                st.success(f"✅ Moved **{tname}** to **{new_bin}**")
+                            for update in move_data['updates']:
+                                # Fuzzy match for each tool in the list
+                                match = my_tools_df[my_tools_df['name'].str.contains(update['tool_name'], case=False)]
+                                if not match.empty:
+                                    tid = match.iloc[0]['id']
+                                    new_house = update.get('new_household') or match.iloc[0]['household']
+                                    new_bin = update.get('new_bin')
+                                    
+                                    dm.update_tool_location(tid, new_bin, new_house, current_user['name'])
+                                    count += 1
+                            
+                            if count > 0:
+                                st.success(f"✅ Updated locations for {count} tools!")
                                 time.sleep(2)
                                 st.rerun()
                             else:
-                                st.error(f"Couldn't find a tool matching '{move_data['tool_name']}' that you own.")
+                                st.warning("Couldn't match those tool names to your inventory.")
+                        else:
+                            st.error("AI couldn't parse the move request.")
 
         st.markdown("---")
 
@@ -369,7 +385,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
             with st.form("ai_prefill_form"):
                 c_ai_1, c_ai_2 = st.columns([1, 3], vertical_alignment="bottom")
                 with c_ai_1:
-                    quick_owner = st.selectbox("Who Owns it?", ALL_OWNERS, index=None, placeholder="Owner...", key="ai_owner_select")
+                    quick_owner = st.selectbox("Who Owns It?", ALL_OWNERS, index=None, placeholder="Owner...", key="ai_owner_select")
                 with c_ai_2:
                     raw_input = st.text_input("Paste Description", key="ai_input")
                 
@@ -409,6 +425,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     st.error("Please paste a description.")
 
             with st.form("add_tool"):
+                # Session Init
                 if 'form_name' not in st.session_state: st.session_state['form_name'] = ""
                 if 'form_brand' not in st.session_state: st.session_state['form_brand'] = ""
                 if 'form_model' not in st.session_state: st.session_state['form_model'] = ""
@@ -448,7 +465,8 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 new_safety = st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], index=st.session_state['form_safety_index'])
                 new_caps = st.text_input("Capabilities", key="form_caps")
                 
-                if st.form_submit_button("💾 Add to Tool Registry", use_container_width=True):
+                # UPDATED SUBMIT BUTTON WITH CALLBACK
+                if st.form_submit_button("💾 Add to Tool Registry", use_container_width=True, on_click=clear_admin_form):
                     if not new_owner or not new_household:
                         st.error("⚠️ Please select Owner and Household")
                     else:
@@ -456,4 +474,4 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                         dm.con.execute("INSERT INTO tools VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
                             (new_id, new_name, new_brand, new_model, new_power, new_owner, new_household, new_bin, new_stationary, 'Available', None, None, new_caps, new_safety))
                         st.success(f"✅ Saved: {new_name}")
-                        st.rerun()
+                        # No rerun needed here because the callback clears state, then script reruns automatically!
