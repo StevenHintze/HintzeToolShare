@@ -2,13 +2,13 @@ import streamlit as st
 import extra_streamlit_components as stx
 from data_manager import DataManager
 from tools_registry import check_safety 
-from gemini_helper import ai_parse_tool, get_ai_advice, get_smart_recommendations, ai_filter_inventory
+from gemini_helper import ai_parse_tool, get_ai_advice, get_smart_recommendations, ai_filter_inventory, parse_location_update
 import time
 import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.13", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.14", page_icon="🛠️")
 
 # Initialize DB
 dm = DataManager()
@@ -93,14 +93,12 @@ current_tabs = st.tabs(tabs)
 with current_tabs[0]:
     st.header("Family Inventory")
     
-    # Layout: Search + Toggle
     c1, c2 = st.columns([5, 1], vertical_alignment="bottom")
     with c1:
         query = st.text_input("🔎 Search or Ask...", placeholder="e.g. 'Automotive tools' or 'What has Shawn borrowed?'")
     with c2:
         use_ai = st.toggle("AI Search", value=False)
 
-    # Filter Logic
     all_tools = dm.con.execute("SELECT * FROM tools").df()
     filtered_df = all_tools
     
@@ -117,8 +115,6 @@ with current_tabs[0]:
             )
             filtered_df = all_tools[mask]
 
-    # Display Inventory
-    # FIX 1: Visually mark stationary items
     def format_location(row):
         loc = f"{row['household']} ({row['bin_location']})"
         if row.get('is_stationary'):
@@ -144,11 +140,8 @@ with current_tabs[0]:
 
     st.markdown("---")
 
-    # Manual Borrowing
     st.subheader("⚡ Quick Borrow")
-    
-    # FIX 2: Filter out Stationary tools from the dropdown
-    # We use .fillna(False) to handle any old data that might be null
+    # Filter out stationary items from quick borrow
     available_only = all_tools[
         (all_tools['status'] == 'Available') & 
         (all_tools['is_stationary'] != True) 
@@ -162,14 +155,13 @@ with current_tabs[0]:
             with col_b2:
                 days = st.number_input("Days", min_value=1, value=7)
             
-            if st.form_submit_button("Confirm Borrowed"):
+            if st.form_submit_button("Confirm Borrow"):
                 tool_row = available_only[available_only['name'] == target_tool_name].iloc[0]
                 
                 if check_safety(current_user['role'], tool_row['safety_rating']):
                     dm.borrow_tool(tool_row['id'], current_user['name'], days)
                     st.success(f"✅ You borrowed the {target_tool_name}!")
                     
-                    # Courier Logic
                     pickup_household = tool_row['household']
                     resident_name = None
                     for owner, house in OWNER_HOMES.items():
@@ -195,7 +187,7 @@ with current_tabs[0]:
                 else:
                     st.error("🚫 Safety Restriction.")
     else:
-        st.info("No transportable tools available right now.")
+        st.info("No transportable tools available.")
 
 # TAB 2: My Workbench
 with current_tabs[1]:
@@ -248,7 +240,7 @@ with current_tabs[2]:
         st.session_state["ai_recs"] = None
 
     if st.session_state["ai_recs"] is None:
-        st.info(f"Planning a project? I'll check your household first, then look for loans.")
+        st.info(f"Planning a project? I'll check {current_user['household']} first, then look for loans.")
         project_query = st.text_area("Describe your project:", placeholder="e.g. I need to sand and stain the deck...")
         
         if st.button("Analyze Needs"):
@@ -292,7 +284,7 @@ with current_tabs[2]:
                     st.session_state["ai_recs"] = None
                     st.rerun()
 
-# TAB 4: Manage Inventory
+# TAB 4: Manage My Tools (Admin & Adults)
 if current_user['role'] in ["ADMIN", "ADULT"]:
     with current_tabs[3]:
         st.header(f"Manage {current_user['name']}'s Inventory")
@@ -307,11 +299,9 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
             with c_move_2:
                 if st.button("Update", use_container_width=True):
                     with st.spinner("Updating..."):
-                        from gemini_helper import parse_location_update
                         move_data = parse_location_update(move_query)
                         
                         if move_data and move_data.get('tool_name'):
-                            # Match tool owned by user
                             my_tools_df = dm.get_my_tools(current_user['name'])
                             match = my_tools_df[my_tools_df['name'].str.contains(move_data['tool_name'], case=False)]
                             
@@ -333,7 +323,6 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
         # --- SECTION 2: SPREADSHEET EDITOR ---
         st.subheader("📝 Edit Details")
         
-        # Admin sees all, Adult sees own
         if current_user['role'] == "ADMIN":
             edit_df = dm.con.execute("SELECT * FROM tools").df()
             st.caption("Admin Mode: Editing ALL tools.")
@@ -377,56 +366,94 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
             st.markdown("---")
             st.subheader("Add New Tool")
             
-            # ... (Paste your previous AI Scan + Form code here from Tab 4) ...
-            # ... (Ensure you un-indent it correctly to fit this block) ...
-            # Or, for cleanliness, you can keep the Add Tool logic here. 
-            # Copy the 'AI Helper' and 'Review & Save' blocks from your PREVIOUS version 
-            # and paste them here indented under `if current_user['role'] == "ADMIN":`
-
-        # --- SECTION 2: SPREADSHEET EDITOR ---
-        st.subheader("📝 Edit Details")
-        
-        # Admins see everything, Adults see only their own
-        if current_user['role'] == "ADMIN":
-            edit_df = dm.con.execute("SELECT * FROM tools").df()
-            st.caption("Admin Mode: Editing ALL tools.")
-        else:
-            edit_df = dm.get_my_tools(current_user['name'])
-            st.caption("Editing ONLY tools you own.")
-
-        # Configure the grid
-        edited_tools = st.data_editor(
-            edit_df,
-            column_config={
-                "id": st.column_config.TextColumn(disabled=True),
-                "status": st.column_config.TextColumn(disabled=True),
-                "borrower": st.column_config.TextColumn(disabled=True),
-                "return_date": st.column_config.TextColumn(disabled=True),
-                "owner": st.column_config.SelectboxColumn(options=ALL_OWNERS, required=True),
-                "household": st.column_config.SelectboxColumn(options=ALL_HOUSEHOLDS, required=True),
-                "safety_rating": st.column_config.SelectboxColumn(options=["Open", "Supervised", "Adult Only"]),
-            },
-            hide_index=True,
-            key="tool_editor"
-        )
-
-        if st.button("💾 Save Changes"):
-            # Identify changes (Streamlit doesn't give diffs easily, so we batch update all visible rows)
-            # In a massive app, we'd diff. For <500 tools, batch updating the user's own tools is fine.
-            dm.batch_update_tools(edited_tools, current_user['name'])
-            st.success("Inventory updated!")
-            st.rerun()
-
-        # --- SECTION 3: HISTORY & REVERT ---
-        st.markdown("---")
-        with st.expander("📜 View History / Audit Trail"):
-            hist_tool_name = st.selectbox("Select tool to view history:", edit_df['name'])
-            if hist_tool_name:
-                hist_tid = edit_df[edit_df['name'] == hist_tool_name].iloc[0]['id']
-                history = dm.get_tool_history(hist_tid)
+            with st.form("ai_prefill_form"):
+                c_ai_1, c_ai_2 = st.columns([1, 3], vertical_alignment="bottom")
+                with c_ai_1:
+                    quick_owner = st.selectbox("Who bought it?", ALL_OWNERS, index=None, placeholder="Owner...", key="ai_owner_select")
+                with c_ai_2:
+                    raw_input = st.text_input("Paste Description", key="ai_input")
                 
-                if not history.empty:
-                    st.dataframe(history)
-                    st.info("To revert: Note the timestamp and ask the Admin (Steven) to restore.")
+                trigger_ai = st.form_submit_button("✨ Auto-Fill", use_container_width=True)
+
+            if trigger_ai:
+                if raw_input:
+                    with st.spinner("Analyzing..."):
+                        ai_data = ai_parse_tool(raw_input)
+                        if ai_data:
+                            st.session_state['form_name'] = ai_data.get('name', '')
+                            st.session_state['form_brand'] = ai_data.get('brand', '')
+                            st.session_state['form_model'] = ai_data.get('model_no', '')
+                            st.session_state['form_caps'] = ai_data.get('capabilities', '')
+                            st.session_state['form_stationary'] = ai_data.get('is_stationary', False)
+                            
+                            try: 
+                                p_options = ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"]
+                                st.session_state['form_power_idx'] = p_options.index(ai_data.get('power_source', 'Manual'))
+                            except: 
+                                st.session_state['form_power_idx'] = 0
+
+                            try:
+                                st.session_state['form_safety_index'] = ["Open", "Supervised", "Adult Only"].index(ai_data.get('safety', 'Open'))
+                            except:
+                                st.session_state['form_safety_index'] = 0
+                            
+                            if quick_owner:
+                                st.session_state['form_owner'] = quick_owner
+                                st.session_state['form_household'] = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0])
+                            
+                            st.success("✅ AI Generated Details - Please Check for Accuracy.")
+                            st.rerun() 
+                        else:
+                            st.error("AI could not generate details from description.")
                 else:
-                    st.write("No history found for this tool.")
+                    st.error("Please paste a description.")
+
+            with st.form("add_tool"):
+                if 'form_name' not in st.session_state: st.session_state['form_name'] = ""
+                if 'form_brand' not in st.session_state: st.session_state['form_brand'] = ""
+                if 'form_model' not in st.session_state: st.session_state['form_model'] = ""
+                if 'form_caps' not in st.session_state: st.session_state['form_caps'] = ""
+                if 'form_stationary' not in st.session_state: st.session_state['form_stationary'] = False
+                if 'form_safety_index' not in st.session_state: st.session_state['form_safety_index'] = 0
+                if 'form_power_idx' not in st.session_state: st.session_state['form_power_idx'] = 0
+                
+                owner_idx = 0
+                if 'form_owner' in st.session_state and st.session_state['form_owner'] in ALL_OWNERS:
+                     owner_idx = ALL_OWNERS.index(st.session_state['form_owner'])
+                
+                house_idx = 0
+                if 'form_household' in st.session_state and st.session_state['form_household'] in ALL_HOUSEHOLDS:
+                     house_idx = ALL_HOUSEHOLDS.index(st.session_state['form_household'])
+
+                new_name = st.text_input("Tool Name", key="form_name")
+                
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    new_brand = st.text_input("Brand", key="form_brand")
+                with c2:
+                    new_model = st.text_input("Model #", key="form_model")
+                with c3:
+                    new_power = st.selectbox("Power", ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"], index=st.session_state['form_power_idx'])
+
+                c4, c5 = st.columns(2)
+                with c4:
+                    new_owner = st.selectbox("Owner", ALL_OWNERS, index=owner_idx, placeholder="Select owner...")
+                with c5:
+                    new_household = st.selectbox("Location", ALL_HOUSEHOLDS, index=house_idx, placeholder="Select household...")
+
+                new_bin = st.text_input("Specific Location", placeholder="e.g. Garage - Shelf 2", key="form_bin")
+                
+                new_stationary = st.checkbox("Stationary Tool (Must be used on-site)", value=st.session_state.get('form_stationary', False))
+
+                new_safety = st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], index=st.session_state['form_safety_index'])
+                new_caps = st.text_input("Capabilities", key="form_caps")
+                
+                if st.form_submit_button("💾 Add to Tool Registry", use_container_width=True):
+                    if not new_owner or not new_household:
+                        st.error("⚠️ Please select Owner and Household")
+                    else:
+                        new_id = f"TOOL_{uuid.uuid4().hex[:6].upper()}"
+                        dm.con.execute("INSERT INTO tools VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+                            (new_id, new_name, new_brand, new_model, new_power, new_owner, new_household, new_bin, new_stationary, 'Available', None, None, new_caps, new_safety))
+                        st.success(f"✅ Saved: {new_name}")
+                        st.rerun()
