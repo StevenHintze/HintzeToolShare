@@ -8,7 +8,7 @@ import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.16", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.17", page_icon="🛠️")
 
 # Initialize DB
 dm = DataManager()
@@ -300,46 +300,92 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
         # --- SECTION 1: SMART MOVER ---
         with st.container(border=True):
             st.subheader("📦 Quick Move")
-            st.info("Moved something? Just say it. (e.g. 'Move all Tekton tools to the outdoor bin')")
+            st.caption("Moved something? Just say it. (e.g. 'I put the hammer in the gray toolbox')")
+            
+            # Init Session State for Confirmation Logic
+            if 'pending_moves' not in st.session_state: 
+                st.session_state['pending_moves'] = None
+
+            # Input UI
             c_move_1, c_move_2 = st.columns([4, 1], vertical_alignment="bottom")
             with c_move_1:
-                move_query = st.text_input("Status Update:", placeholder="e.g. 'I moved the circular saw to the basement shelf'")
+                # If we have pending moves, disable input to force a decision
+                is_locked = st.session_state['pending_moves'] is not None
+                move_query = st.text_input("Status Update:", placeholder="Describe the move...", key="move_input", disabled=is_locked)
             with c_move_2:
-                if st.button("Update", use_container_width=True):
-                    with st.spinner("Updating..."):
-                        # 1. Get the user's tools FIRST
-                        my_tools_df = dm.get_my_tools(current_user['name'])
+                if not is_locked:
+                    preview_btn = st.button("Preview", use_container_width=True)
+                else:
+                    preview_btn = False
+
+            # Logic 1: Generate Preview
+            if preview_btn and move_query:
+                with st.spinner("Locating tools..."):
+                    # Get user inventory
+                    my_tools_df = dm.get_my_tools(current_user['name'])
+                    
+                    if my_tools_df.empty:
+                        st.toast("You don't have any tools to move!", icon="🚫")
+                    else:
+                        # Pass inventory to AI
+                        from gemini_helper import parse_location_update
+                        move_data = parse_location_update(move_query, my_tools_df)
                         
-                        if my_tools_df.empty:
-                            st.error("You don't have any tools to move!")
-                        else:
-                            # 2. Pass inventory to AI so it can match Brands/Names to IDs
-                            from gemini_helper import parse_location_update
-                            move_data = parse_location_update(move_query, my_tools_df)
-                            
-                            if move_data and move_data.get('updates'):
-                                count = 0
-                                for update in move_data['updates']:
-                                    tid = update.get('tool_id')
+                        proposed_changes = []
+                        if move_data and move_data.get('updates'):
+                            for update in move_data['updates']:
+                                tid = update.get('tool_id')
+                                if tid in my_tools_df['id'].values:
+                                    # Get current details
+                                    curr_row = my_tools_df[my_tools_df['id'] == tid].iloc[0]
                                     
-                                    # verify ID exists in user's list (security check)
-                                    if tid in my_tools_df['id'].values:
-                                        # Get current household if AI didn't specify a new one
-                                        current_house = my_tools_df[my_tools_df['id'] == tid].iloc[0]['household']
-                                        new_house = update.get('new_household') or current_house
-                                        new_bin = update.get('new_bin')
-                                        
-                                        dm.update_tool_location(tid, new_bin, new_house, current_user['name'])
-                                        count += 1
-                                
-                                if count > 0:
-                                    st.success(f"✅ Moved {count} tools to **{move_data['updates'][0]['new_bin']}**!")
-                                    time.sleep(2)
-                                    st.rerun()
-                                else:
-                                    st.warning("AI identified tools, but IDs didn't match your registry.")
-                            else:
-                                st.error("Couldn't understand the move request.")
+                                    # Calculate New Values
+                                    new_h = update.get('new_household') or curr_row['household']
+                                    new_b = update.get('new_bin')
+                                    
+                                    proposed_changes.append({
+                                        "ID": tid,
+                                        "Tool Name": curr_row['name'],
+                                        "Current Location": f"{curr_row['household']} ({curr_row['bin_location']})",
+                                        "New Location": f"{new_h} ({new_b})",
+                                        "_bin": new_b,       # Hidden for logic
+                                        "_house": new_h      # Hidden for logic
+                                    })
+                        
+                        if proposed_changes:
+                            st.session_state['pending_moves'] = proposed_changes
+                            st.rerun()
+                        else:
+                            st.toast("Couldn't find those tools in your inventory.", icon="🤷")
+
+            # Logic 2: Confirmation UI
+            if st.session_state['pending_moves']:
+                st.markdown("#### ⚠️ Review Changes")
+                
+                # Show clean table
+                df_review = pd.DataFrame(st.session_state['pending_moves'])
+                st.dataframe(df_review[["Tool Name", "Current Location", "New Location"]], use_container_width=True, hide_index=True)
+                
+                col_yes, col_no = st.columns(2)
+                
+                # ACTION: Confirm
+                if col_yes.button("✅ Yes, Update Database", type="primary", use_container_width=True):
+                    count = 0
+                    for change in st.session_state['pending_moves']:
+                        dm.update_tool_location(change['ID'], change['_bin'], change['_house'], current_user['name'])
+                        count += 1
+                    
+                    st.toast(f"Success! Moved {count} tools.", icon="🎉")
+                    st.session_state['pending_moves'] = None
+                    time.sleep(1) # Let toast show
+                    st.rerun()
+                
+                # ACTION: Cancel
+                if col_no.button("❌ Cancel", use_container_width=True):
+                    st.session_state['pending_moves'] = None
+                    st.rerun()
+
+        st.markdown("---")
 
         # --- SECTION 2: SPREADSHEET EDITOR ---
         st.subheader("📝 Edit Details")
@@ -368,7 +414,8 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
 
         if st.button("💾 Save Changes"):
             dm.batch_update_tools(edited_tools, current_user['name'])
-            st.success("Inventory updated!")
+            st.toast("Inventory updated successfully!", icon="💾")
+            time.sleep(1)
             st.rerun()
 
         # --- SECTION 3: HISTORY ---
@@ -422,7 +469,8 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                                 st.session_state['form_owner'] = quick_owner
                                 st.session_state['form_household'] = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0])
                             
-                            st.success("✅ AI Generated Details - Please Check for Accuracy.")
+                            st.toast("AI Generated Details - Check Step 2", icon="🤖")
+                            time.sleep(0.5)
                             st.rerun() 
                         else:
                             st.error("AI could not generate details from description.")
@@ -430,7 +478,6 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     st.error("Please paste a description.")
 
             with st.form("add_tool"):
-                # Session Init
                 if 'form_name' not in st.session_state: st.session_state['form_name'] = ""
                 if 'form_brand' not in st.session_state: st.session_state['form_brand'] = ""
                 if 'form_model' not in st.session_state: st.session_state['form_model'] = ""
@@ -441,11 +488,11 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 
                 owner_idx = 0
                 if 'form_owner' in st.session_state and st.session_state['form_owner'] in ALL_OWNERS:
-                     owner_idx = ALL_OWNERS.index(st.session_state['form_owner'])
+                 owner_idx = ALL_OWNERS.index(st.session_state['form_owner'])
                 
                 house_idx = 0
                 if 'form_household' in st.session_state and st.session_state['form_household'] in ALL_HOUSEHOLDS:
-                     house_idx = ALL_HOUSEHOLDS.index(st.session_state['form_household'])
+                 house_idx = ALL_HOUSEHOLDS.index(st.session_state['form_household'])
 
                 new_name = st.text_input("Tool Name", key="form_name")
                 
@@ -470,13 +517,13 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 new_safety = st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], index=st.session_state['form_safety_index'])
                 new_caps = st.text_input("Capabilities", key="form_caps")
                 
-                # UPDATED SUBMIT BUTTON WITH CALLBACK
-                if st.form_submit_button("💾 Add to Tool Registry", use_container_width=True, on_click=clear_admin_form):
+                if st.form_submit_button("💾 Add to Tool Registry", use_container_width=True):
                     if not new_owner or not new_household:
                         st.error("⚠️ Please select Owner and Household")
                     else:
                         new_id = f"TOOL_{uuid.uuid4().hex[:6].upper()}"
                         dm.con.execute("INSERT INTO tools VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
                             (new_id, new_name, new_brand, new_model, new_power, new_owner, new_household, new_bin, new_stationary, 'Available', None, None, new_caps, new_safety))
-                        st.success(f"✅ Saved: {new_name}")
-                        # No rerun needed here because the callback clears state, then script reruns automatically!
+                        st.toast(f"Saved: {new_name}", icon="✅")
+                        time.sleep(1)
+                        st.rerun()
