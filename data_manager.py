@@ -132,3 +132,11 @@ class DataManager:
 
     def seed_data(self, tools_list, family_list):
         pass
+    def retire_tool(self, tool_id, reason, user_name):
+        self._archive_tool(tool_id, user_name)
+        # We use a special status 'Retired' so we keep the record but hide it
+        self.con.execute("""
+            UPDATE tools 
+            SET status = 'Retired', bin_location = ? 
+            WHERE id = ?
+        """, [f"Retired: {reason}", tool_id])

@@ -8,7 +8,7 @@ import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.17", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.18", page_icon="🛠️")
 
 # Initialize DB
 dm = DataManager()
@@ -297,95 +297,81 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
     with current_tabs[3]:
         st.header(f"Manage {current_user['name']}'s Inventory")
         
-        # --- SECTION 1: SMART MOVER ---
+        # --- SECTION 1: QUICK ACTIONS (Move / Retire) ---
         with st.container(border=True):
-            st.subheader("📦 Quick Move")
-            st.caption("Moved something? Just say it. (e.g. 'I put the hammer in the gray toolbox')")
+            st.subheader("⚡ Quick Actions")
+            st.caption("Move, Sell, Donate, or Report Broken tools here. (e.g. 'I sold the miter saw')")
             
-            # Init Session State for Confirmation Logic
+            # FIX: Stacked layout prevents text overlap
+            move_query = st.text_input("Action Description:", placeholder="Describe what happened...", key="move_input")
+            
             if 'pending_moves' not in st.session_state: 
                 st.session_state['pending_moves'] = None
 
-            # Input UI
-            c_move_1, c_move_2 = st.columns([4, 1], vertical_alignment="bottom")
-            with c_move_1:
-                # If we have pending moves, disable input to force a decision
-                is_locked = st.session_state['pending_moves'] is not None
-                move_query = st.text_input("Status Update:", placeholder="Describe the move...", key="move_input", disabled=is_locked)
-            with c_move_2:
-                if not is_locked:
-                    preview_btn = st.button("Preview", use_container_width=True)
-                else:
-                    preview_btn = False
-
-            # Logic 1: Generate Preview
-            if preview_btn and move_query:
-                with st.spinner("Locating tools..."):
-                    # Get user inventory
-                    my_tools_df = dm.get_my_tools(current_user['name'])
-                    
-                    if my_tools_df.empty:
-                        st.toast("You don't have any tools to move!", icon="🚫")
-                    else:
-                        # Pass inventory to AI
-                        from gemini_helper import parse_location_update
-                        move_data = parse_location_update(move_query, my_tools_df)
-                        
-                        proposed_changes = []
-                        if move_data and move_data.get('updates'):
-                            for update in move_data['updates']:
-                                tid = update.get('tool_id')
-                                if tid in my_tools_df['id'].values:
-                                    # Get current details
-                                    curr_row = my_tools_df[my_tools_df['id'] == tid].iloc[0]
-                                    
-                                    # Calculate New Values
-                                    new_h = update.get('new_household') or curr_row['household']
-                                    new_b = update.get('new_bin')
-                                    
-                                    proposed_changes.append({
-                                        "ID": tid,
-                                        "Tool Name": curr_row['name'],
-                                        "Current Location": f"{curr_row['household']} ({curr_row['bin_location']})",
-                                        "New Location": f"{new_h} ({new_b})",
-                                        "_bin": new_b,       # Hidden for logic
-                                        "_house": new_h      # Hidden for logic
-                                    })
-                        
-                        if proposed_changes:
-                            st.session_state['pending_moves'] = proposed_changes
-                            st.rerun()
+            # Preview Button is now full width below input
+            if st.button("Preview Action", use_container_width=True):
+                if move_query:
+                    with st.spinner("Analyzing..."):
+                        my_tools_df = dm.get_my_tools(current_user['name'])
+                        if my_tools_df.empty:
+                            st.toast("No tools found.", icon="🚫")
                         else:
-                            st.toast("Couldn't find those tools in your inventory.", icon="🤷")
+                            from gemini_helper import parse_location_update
+                            move_data = parse_location_update(move_query, my_tools_df)
+                            
+                            proposed_changes = []
+                            if move_data and move_data.get('updates'):
+                                for update in move_data['updates']:
+                                    tid = update.get('tool_id')
+                                    if tid in my_tools_df['id'].values:
+                                        curr_row = my_tools_df[my_tools_df['id'] == tid].iloc[0]
+                                        action = update.get('action', 'MOVE')
+                                        
+                                        if action == "RETIRE":
+                                            new_desc = f"❌ RETIRE ({update.get('reason', 'Gone')})"
+                                        else:
+                                            new_desc = f"📍 MOVE to {update.get('new_bin')}"
+
+                                        proposed_changes.append({
+                                            "ID": tid,
+                                            "Tool": curr_row['name'],
+                                            "Action": new_desc,
+                                            "_data": update
+                                        })
+                            
+                            if proposed_changes:
+                                st.session_state['pending_moves'] = proposed_changes
+                                st.rerun()
+                            else:
+                                st.toast("No matching tools found.", icon="🤷")
 
             # Logic 2: Confirmation UI
             if st.session_state['pending_moves']:
-                st.markdown("#### ⚠️ Review Changes")
-                
-                # Show clean table
+                st.markdown("#### 🛡️ Verify Changes")
                 df_review = pd.DataFrame(st.session_state['pending_moves'])
-                st.dataframe(df_review[["Tool Name", "Current Location", "New Location"]], use_container_width=True, hide_index=True)
+                st.dataframe(df_review[["Tool", "Action"]], use_container_width=True, hide_index=True)
                 
                 col_yes, col_no = st.columns(2)
                 
-                # ACTION: Confirm
-                if col_yes.button("✅ Yes, Update Database", type="primary", use_container_width=True):
+                # A11Y FIX: Use Primary (White/Black) vs Secondary (Grey) instead of Red/Green
+                if col_yes.button("Confirm Update", type="primary", use_container_width=True):
                     count = 0
                     for change in st.session_state['pending_moves']:
-                        dm.update_tool_location(change['ID'], change['_bin'], change['_house'], current_user['name'])
+                        data = change['_data']
+                        if data.get('action') == 'RETIRE':
+                            dm.retire_tool(data['tool_id'], data.get('reason', 'Retired'), current_user['name'])
+                        else:
+                            dm.update_tool_location(data['tool_id'], data.get('new_bin'), data.get('new_household'), current_user['name'])
                         count += 1
                     
-                    st.toast(f"Success! Moved {count} tools.", icon="🎉")
+                    st.toast(f"Success! Updated {count} tools.", icon="✅")
                     st.session_state['pending_moves'] = None
-                    time.sleep(1) # Let toast show
+                    time.sleep(1)
                     st.rerun()
                 
-                # ACTION: Cancel
-                if col_no.button("❌ Cancel", use_container_width=True):
+                if col_no.button("Cancel", use_container_width=True):
                     st.session_state['pending_moves'] = None
                     st.rerun()
-
-        st.markdown("---")
 
         # --- SECTION 2: SPREADSHEET EDITOR ---
         st.subheader("📝 Edit Details")

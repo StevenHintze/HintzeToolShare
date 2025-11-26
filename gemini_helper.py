@@ -192,41 +192,43 @@ def ai_parse_tool(raw_text):
 
 def parse_location_update(user_query, user_tools_df):
     """
-    Analyzes user query against their specific inventory to find Tool IDs to move.
+    Analyzes user query to Move OR Retire tools.
     """
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        # Create a mini-context of the user's own tools
-        # We include ID, Name, and Brand so it can match "Tekton" or "Drills"
+        # Mini-Context
         tool_list_str = ""
         for index, row in user_tools_df.iterrows():
-            tool_list_str += f"- ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']} | Loc: {row['bin_location']}\n"
+            tool_list_str += f"- ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']}\n"
         
         prompt = f"""
         You are an Inventory Manager.
         
         USER REQUEST: "{user_query}"
-        
         USER'S INVENTORY:
         {tool_list_str}
         
         YOUR TASK:
-        1. Identify which specific Tool IDs from the INVENTORY match the user's request.
-        2. If the user says "Tekton tools", find ALL items with Brand "Tekton" or "Tekton" in the name.
-        3. Extract the new location (bin/shelf) and optional household.
+        1. Match tools from the inventory list to the user request.
+        2. Determine the ACTION: 'MOVE' or 'RETIRE' (Sold/Broken/Donated/Deleted).
         
         OUTPUT JSON:
         {{
             "updates": [
-                {{ "tool_id": "EXACT_ID_FROM_LIST", "new_bin": "New Location String", "new_household": "Infer or null" }},
-                {{ "tool_id": "NEXT_ID", "new_bin": "New Location String", "new_household": "Infer or null" }}
+                {{ 
+                    "tool_id": "EXACT_ID", 
+                    "action": "MOVE" or "RETIRE",
+                    "new_bin": "Location string (if MOVE)", 
+                    "new_household": "Household string (if MOVE)",
+                    "reason": "Sold/Broken/etc (if RETIRE)"
+                }}
             ]
         }}
         """
         response = model.generate_content(prompt)
         clean_text = response.text.replace("```json", "").replace("```", "").strip()
         return json.loads(clean_text)
-    except Exception as e:
+    except:
         return None
