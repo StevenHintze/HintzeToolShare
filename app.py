@@ -310,7 +310,8 @@ if current_user['role'] == "ADMIN":
                         st.session_state['form_caps'] = ai_data.get('capabilities', '')
                         
                         try: 
-                            p_idx = ["Manual", "Corded", "Battery", "Gas"].index(ai_data.get('power_source', 'Manual'))
+                            power_options = ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"]
+                            p_idx = power_options.index(ai_data.get('power_source', 'Manual'))
                             st.session_state['form_power_idx'] = p_idx
                         except: 
                             st.session_state['form_power_idx'] = 0
@@ -357,8 +358,9 @@ if current_user['role'] == "ADMIN":
                 new_brand = st.text_input("Brand", key="form_brand")
             with c2:
                 new_model = st.text_input("Model #", key="form_model")
+            # Updated list in the actual selectbox
             with c3:
-                new_power = st.selectbox("Power", ["Manual", "Corded", "Battery", "Gas"], index=st.session_state['form_power_idx'])
+                new_power = st.selectbox("Power", ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"], index=st.session_state['form_power_idx'])
 
             c4, c5 = st.columns(2)
             with c4:

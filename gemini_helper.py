@@ -163,7 +163,7 @@ def ai_parse_tool(raw_text):
         1. Name: Clean, concise tool name.
         2. Brand: The manufacturer.
         3. Model: The specific model number.
-        4. Power: "Corded", "Battery", "Gas", or "Manual".
+        4. Power: Choose one: "Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic".
         5. Safety: "Open", "Supervised", or "Adult Only".
         6. Capabilities: A clean string of 3-5 comma-separated keywords.
         
