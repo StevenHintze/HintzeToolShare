@@ -369,7 +369,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
             with st.form("ai_prefill_form"):
                 c_ai_1, c_ai_2 = st.columns([1, 3], vertical_alignment="bottom")
                 with c_ai_1:
-                    quick_owner = st.selectbox("Who bought it?", ALL_OWNERS, index=None, placeholder="Owner...", key="ai_owner_select")
+                    quick_owner = st.selectbox("Who Owns it?", ALL_OWNERS, index=None, placeholder="Owner...", key="ai_owner_select")
                 with c_ai_2:
                     raw_input = st.text_input("Paste Description", key="ai_input")
                 
