@@ -14,15 +14,27 @@ st.set_page_config(page_title="HFTS v0.9.21", page_icon="🛠️")
 dm = DataManager()
 dm.seed_data([], []) 
 
+# --- COOKIE MANAGER ---
+cookie_manager = stx.CookieManager()
+
+# --- DYNAMIC DATA ---
+try:
+    family_df = dm.get_family_members()
+    OWNER_HOMES = dict(zip(family_df['name'], family_df['household']))
+    ALL_OWNERS = list(OWNER_HOMES.keys())
+    ALL_HOUSEHOLDS = list(set(OWNER_HOMES.values()))
+except:
+    OWNER_HOMES = {}
+    ALL_OWNERS = ["Admin"]
+    ALL_HOUSEHOLDS = ["Main House"]
+
 # --- CALLBACKS ---
 def save_tool_callback():
     """Handles saving and clearing the form safely."""
-    # 1. Validation
     if not st.session_state.get('tool_owner') or not st.session_state.get('tool_household'):
         st.session_state['admin_error'] = "⚠️ Please select an Owner and Location."
         return
 
-    # 2. Database Insert
     try:
         dm_cb = DataManager()
         new_id = f"TOOL_{uuid.uuid4().hex[:6].upper()}"
@@ -44,7 +56,7 @@ def save_tool_callback():
         st.toast(f"**Saved:** {st.session_state['tool_name']}", icon="✅")
         st.session_state['admin_error'] = None
         
-        # 3. Clear Form
+        # Clear Text Fields
         st.session_state['tool_name'] = ""
         st.session_state['tool_brand'] = ""
         st.session_state['tool_model'] = ""
@@ -53,26 +65,13 @@ def save_tool_callback():
         st.session_state['tool_stationary'] = False
         st.session_state['ai_input'] = ""
         
-        # Reset dropdowns to defaults
+        # Reset Dropdowns to logical defaults
         st.session_state['tool_power'] = "Manual"
         st.session_state['tool_safety'] = "Open"
+        # Note: We leave Owner/Household as-is (sticky) for easier bulk entry
         
     except Exception as e:
         st.session_state['admin_error'] = f"Error: {str(e)}"
-
-# --- COOKIE MANAGER ---
-cookie_manager = stx.CookieManager()
-
-# --- DYNAMIC DATA ---
-try:
-    family_df = dm.get_family_members()
-    OWNER_HOMES = dict(zip(family_df['name'], family_df['household']))
-    ALL_OWNERS = list(OWNER_HOMES.keys())
-    ALL_HOUSEHOLDS = list(set(OWNER_HOMES.values()))
-except:
-    OWNER_HOMES = {}
-    ALL_OWNERS = ["Admin"]
-    ALL_HOUSEHOLDS = ["Main House"]
 
 # --- AUTHENTICATION ---
 if "user_info" not in st.session_state:
@@ -419,9 +418,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     st.toast(f"""
                         **✅ Update Complete**
                         
-                        We moved **{count}** tools to:
-                        
-                        `{last_bin}`
+                        Updated **{count}** tools.
                         """, icon="📦")
                     st.session_state['pending_moves'] = None
                     time.sleep(1)
@@ -483,9 +480,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
             st.markdown("---")
             st.subheader("Add New Tool")
             
-            if 'admin_error' in st.session_state and st.session_state['admin_error']:
-                st.error(st.session_state['admin_error'])
-
+            # AI Auto-Fill Section
             with st.form("ai_prefill_form"):
                 c_ai_1, c_ai_2 = st.columns([1, 3], vertical_alignment="bottom")
                 with c_ai_1:
@@ -500,7 +495,6 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     with st.spinner("Analyzing..."):
                         ai_data = ai_parse_tool(raw_input)
                         if ai_data:
-                            # UPDATE STATE
                             st.session_state['tool_name'] = ai_data.get('name', '')
                             st.session_state['tool_brand'] = ai_data.get('brand', '')
                             st.session_state['tool_model'] = ai_data.get('model_no', '')
@@ -509,22 +503,15 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                             
                             try: 
                                 p_list = ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"]
-                                # Check if returned value is valid, else default
-                                raw_power = ai_data.get('power_source', 'Manual')
-                                if raw_power in p_list:
-                                    st.session_state['tool_power'] = raw_power
-                                else:
-                                    st.session_state['tool_power'] = "Manual"
+                                raw_p = ai_data.get('power_source', 'Manual')
+                                st.session_state['tool_power'] = raw_p if raw_p in p_list else "Manual"
                             except: 
                                 st.session_state['tool_power'] = "Manual"
 
                             try:
                                 s_list = ["Open", "Supervised", "Adult Only"]
-                                raw_safety = ai_data.get('safety', 'Open')
-                                if raw_safety in s_list:
-                                    st.session_state['tool_safety'] = raw_safety
-                                else:
-                                    st.session_state['tool_safety'] = "Open"
+                                raw_s = ai_data.get('safety', 'Open')
+                                st.session_state['tool_safety'] = raw_s if raw_s in s_list else "Open"
                             except:
                                 st.session_state['tool_safety'] = "Open"
                             
@@ -535,50 +522,51 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                             st.toast("AI Generated Details - Please Check for Accuracy.", icon="🤖")
                             st.rerun() 
                         else:
-                            st.error("AI could not generate details.")
+                            st.error("AI could not generate details from description.")
+                else:
+                    st.error("Please paste a description.")
 
-            # REAL FORM
+            # Main Add Tool Form
             with st.form("add_tool"):
-                # INIT SESSION STATE KEYS if missing
-                keys = ['tool_name', 'tool_brand', 'tool_model', 'tool_caps', 'tool_bin', 'tool_owner', 'tool_household', 'tool_power', 'tool_safety']
+                # Ensure keys exist with default values (FIX for yellow warning)
+                keys = ['tool_name', 'tool_brand', 'tool_model', 'tool_caps', 'tool_bin']
                 for k in keys:
                     if k not in st.session_state: st.session_state[k] = ""
+                
+                if 'tool_power' not in st.session_state: st.session_state['tool_power'] = "Manual"
+                if 'tool_safety' not in st.session_state: st.session_state['tool_safety'] = "Open"
                 if 'tool_stationary' not in st.session_state: st.session_state['tool_stationary'] = False
                 
-                # Use SESSION STATE values directly for `value=` (Not Index)
-                st.text_input("Tool Name", key="tool_name")
+                # Default Owner Logic: If not set, pick first available
+                if 'tool_owner' not in st.session_state or st.session_state['tool_owner'] not in ALL_OWNERS:
+                    st.session_state['tool_owner'] = ALL_OWNERS[0] if ALL_OWNERS else None
+                
+                if 'tool_household' not in st.session_state or st.session_state['tool_household'] not in ALL_HOUSEHOLDS:
+                    st.session_state['tool_household'] = ALL_HOUSEHOLDS[0] if ALL_HOUSEHOLDS else None
+
+                new_name = st.text_input("Tool Name", key="tool_name")
+                
                 c1, c2, c3 = st.columns(3)
-                with c1: st.text_input("Brand", key="tool_brand")
-                with c2: st.text_input("Model #", key="tool_model")
-                with c3: 
-                    # Dropdown Logic: If session state is empty/invalid, default to first option
-                    curr_pow = st.session_state.get('tool_power')
-                    pow_opts = ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"]
-                    idx_pow = pow_opts.index(curr_pow) if curr_pow in pow_opts else 0
-                    st.selectbox("Power", pow_opts, index=idx_pow, key="tool_power")
+                with c1:
+                    new_brand = st.text_input("Brand", key="tool_brand")
+                with c2:
+                    new_model = st.text_input("Model #", key="tool_model")
+                with c3:
+                    # FIX: No index=... argument. The 'key' handles the default value from session state.
+                    new_power = st.selectbox("Power", ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"], key="tool_power")
 
                 c4, c5 = st.columns(2)
-                with c4: 
-                    # Owner Logic
-                    curr_own = st.session_state.get('tool_owner')
-                    idx_own = ALL_OWNERS.index(curr_own) if curr_own in ALL_OWNERS else 0
-                    st.selectbox("Owner", ALL_OWNERS, index=idx_own, key="tool_owner")
-                with c5: 
-                    # Household Logic
-                    curr_house = st.session_state.get('tool_household')
-                    idx_house = ALL_HOUSEHOLDS.index(curr_house) if curr_house in ALL_HOUSEHOLDS else 0
-                    st.selectbox("Location", ALL_HOUSEHOLDS, index=idx_house, key="tool_household")
+                with c4:
+                    new_owner = st.selectbox("Owner", ALL_OWNERS, key="tool_owner")
+                with c5:
+                    new_household = st.selectbox("Location", ALL_HOUSEHOLDS, key="tool_household")
 
-                st.text_input("Specific Location", placeholder="e.g. Garage - Shelf 2", key="tool_bin")
-                st.checkbox("Stationary Tool (Must be used on-site)", key="tool_stationary")
+                new_bin = st.text_input("Specific Location", placeholder="e.g. Garage - Shelf 2", key="tool_bin")
                 
-                # Safety Logic
-                curr_safe = st.session_state.get('tool_safety')
-                safe_opts = ["Open", "Supervised", "Adult Only"]
-                idx_safe = safe_opts.index(curr_safe) if curr_safe in safe_opts else 0
-                st.selectbox("Safety", safe_opts, index=idx_safe, key="tool_safety")
+                new_stationary = st.checkbox("Stationary Tool (Must be used on-site)", key="tool_stationary")
+
+                new_safety = st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], key="tool_safety")
+                new_caps = st.text_input("Capabilities", key="tool_caps")
                 
-                st.text_input("Capabilities", key="tool_caps")
-                
-                # CALL THE CALLBACK ON CLICK
+                # Submit with Callback
                 st.form_submit_button("💾 Add to Tool Registry", use_container_width=True, on_click=save_tool_callback)
