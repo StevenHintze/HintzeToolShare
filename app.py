@@ -13,8 +13,52 @@ st.set_page_config(page_title="HFTS v0.9.21", page_icon="🛠️")
 # Initialize DB
 dm = DataManager()
 dm.seed_data([], []) 
-if st.sidebar.button("Admin Cleanup", key="cleanup"): # Hidden utility
-    dm.clean_old_sessions()
+
+# --- CALLBACKS ---
+def save_tool_callback():
+    """Handles saving and clearing the form safely."""
+    # 1. Validation
+    if not st.session_state.get('tool_owner') or not st.session_state.get('tool_household'):
+        st.session_state['admin_error'] = "⚠️ Please select an Owner and Location."
+        return
+
+    # 2. Database Insert
+    try:
+        dm_cb = DataManager()
+        new_id = f"TOOL_{uuid.uuid4().hex[:6].upper()}"
+        
+        dm_cb.con.execute("INSERT INTO tools VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+            (new_id, 
+             st.session_state['tool_name'], 
+             st.session_state['tool_brand'], 
+             st.session_state['tool_model'], 
+             st.session_state['tool_power'], 
+             st.session_state['tool_owner'], 
+             st.session_state['tool_household'], 
+             st.session_state['tool_bin'], 
+             st.session_state['tool_stationary'], 
+             'Available', None, None, 
+             st.session_state['tool_caps'], 
+             st.session_state['tool_safety']))
+        
+        st.toast(f"**Saved:** {st.session_state['tool_name']}", icon="✅")
+        st.session_state['admin_error'] = None
+        
+        # 3. Clear Form
+        st.session_state['tool_name'] = ""
+        st.session_state['tool_brand'] = ""
+        st.session_state['tool_model'] = ""
+        st.session_state['tool_caps'] = ""
+        st.session_state['tool_bin'] = ""
+        st.session_state['tool_stationary'] = False
+        st.session_state['ai_input'] = ""
+        
+        # Reset dropdowns to defaults
+        st.session_state['tool_power'] = "Manual"
+        st.session_state['tool_safety'] = "Open"
+        
+    except Exception as e:
+        st.session_state['admin_error'] = f"Error: {str(e)}"
 
 # --- COOKIE MANAGER ---
 cookie_manager = stx.CookieManager()
@@ -34,42 +78,29 @@ except:
 if "user_info" not in st.session_state:
     st.session_state["user_info"] = None
 
-cookie_token = cookie_manager.get(cookie="hfts_session")
+cookie_email = cookie_manager.get(cookie="hfts_user")
 
-if st.session_state["user_info"] is None and cookie_token:
-    # Validate TOKEN against DB (Secure)
-    user = dm.get_user_from_session(cookie_token)
+if st.session_state["user_info"] is None and cookie_email:
+    user = dm.get_user_by_email(cookie_email)
     if user:
         st.session_state["user_info"] = user
         st.query_params.clear()
-    else:
-        # Token is invalid/expired, delete the bad cookie
-        cookie_manager.delete("hfts_session")
 
 def login():
-    # FORCE CLEAN: Remove all whitespace and lowercase immediately
-    raw_email = st.session_state.get("email_input", "")
-    email = str(raw_email).strip().lower()
-    
+    email = st.session_state.get("email_input", "").strip().lower()
     password = st.session_state.get("password_input", "")
     
     if password == st.secrets["FAMILY_PASSWORD"]:
         user = dm.get_user_by_email(email)
         if user:
-            # ... (Success logic stays the same) ...
             st.session_state["user_info"] = user
-            token = dm.create_session(email)
-            expires = datetime.datetime.now() + datetime.timedelta(days=7)
-            cookie_manager.set("hfts_session", token, expires_at=expires)
+            expires = datetime.datetime.now() + datetime.timedelta(days=30)
+            cookie_manager.set("hfts_user", email, expires_at=expires)
             st.success(f"Welcome back, {user['name']}!")
             time.sleep(1)
             st.rerun()
         else:
-            # ERROR: Show exactly what failed to help debug
-            st.error(f"Email '{email}' not found in registry.")
-            # Check if it's a registry mismatch
-            # (Optional: You could print valid emails to console for your own debugging)
-            # print(f"Attempted: {email}")
+            st.error("Email not found in the Family Registry.")
     else:
         st.error("Incorrect Family Password.")
 
@@ -80,14 +111,6 @@ if st.session_state["user_info"] is None:
     if st.button("Log In"):
         login()
     st.stop()
-
-# --- HELPER: CLEAR FORM CALLBACK ---
-def clear_admin_form():
-    """Resets all admin form session state keys"""
-    keys = ['form_name', 'form_brand', 'form_model', 'form_caps', 'form_bin', 'form_power_idx', 'form_safety_index', 'ai_input']
-    for k in keys:
-        if k in st.session_state:
-            del st.session_state[k] # Deleting causes Streamlit to re-init them to empty on next run
 
 # --- APP STARTS HERE ---
 current_user = st.session_state["user_info"]
@@ -100,14 +123,7 @@ st.sidebar.write(f"**Role:** {current_user['role']}")
 st.sidebar.write(f"**House:** {current_user['household']}")
 
 if st.sidebar.button("Log Out"):
-    # 1. Remove from Browser
-    cookie_token = cookie_manager.get(cookie="hfts_session")
-    cookie_manager.delete("hfts_session")
-    
-    # 2. Remove from Server (Revoke access immediately)
-    if cookie_token:
-        dm.revoke_session(cookie_token)
-        
+    cookie_manager.delete("hfts_user")
     st.session_state["user_info"] = None
     time.sleep(1) 
     st.rerun()
@@ -127,7 +143,6 @@ with current_tabs[0]:
     with c1:
         query = st.text_input("🔎 Search or Ask...", placeholder="e.g. 'Automotive tools' or 'What has Shawn borrowed?'")
     with c2:
-        # UPDATED: Default value is True
         use_ai = st.toggle("AI Search", value=True)
 
     all_tools = dm.con.execute("SELECT * FROM tools").df()
@@ -272,7 +287,6 @@ with current_tabs[2]:
     if st.session_state["ai_recs"] is None:
         st.info(f"Describe your job. I'll check your household, find loans, and identify missing items.")
         
-        # BUG FIX #1: Wrapped in form so Ctrl+Enter triggers submit
         with st.form("project_form"):
             project_query = st.text_area("Describe your project:", placeholder="e.g. I need to rotate my tires and change the oil...")
             submit_search = st.form_submit_button("Analyze Needs")
@@ -291,33 +305,28 @@ with current_tabs[2]:
             st.session_state["ai_recs"] = None
             st.rerun()
 
-        # 1. Things you have
         if recs.get('locate_list'):
             st.success("✅ **You already own these:**")
             for item in recs['locate_list']:
                 st.markdown(f"- **{item['tool_name']}** ({item.get('location', 'Home')})")
         
-        # 2. Things to chase down
         if recs.get('track_down_list'):
             st.warning("⚠️ **You own these, but they are gone:**")
             for item in recs['track_down_list']:
                 st.markdown(f"- **{item['tool_name']}** is with **{item['held_by']}**")
 
-        # 3. THINGS MISSING (Bug Fix #2)
         if recs.get('missing_list'):
             st.error("🛑 **Missing Essentials (Not in Family Registry):**")
             for item in recs['missing_list']:
                 st.markdown(f"**{item['tool_name']}** ({item['importance']})")
                 st.caption(f"💡 *Advice: {item['advice']}*")
 
-        # 4. The Shopping Cart
         if recs.get('borrow_list'):
             st.info("🛒 **Tools to Borrow:**")
             with st.form("smart_borrow"):
                 selected_ids = []
                 for item in recs['borrow_list']:
                     label = f"**{item['name']}** from {item['household']}"
-                    # Only show checkbox if we have a valid ID
                     if item.get('tool_id') and item['tool_id'] != "Unknown":
                         if st.checkbox(label, value=True, help=item['reason']):
                             selected_ids.append(item['tool_id'])
@@ -337,7 +346,6 @@ with current_tabs[2]:
                     else:
                         st.warning("No tools selected.")
         
-        # If nothing to do
         elif not recs.get('missing_list'):
             st.info("Looks like you have everything you need at home! Good luck.")
 
@@ -346,20 +354,17 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
     with current_tabs[3]:
         st.header(f"Manage {current_user['name']}'s Inventory")
         
-        # --- SECTION 1: QUICK ACTIONS ---
+        # --- QUICK ACTIONS ---
         with st.container(border=True):
             st.subheader("⚡ Quick Actions")
             st.caption("Move, Sell, Donate, or Report Broken tools.")
             
-            # REVERTED LAYOUT: Input + Button side-by-side
             c_act_1, c_act_2 = st.columns([4, 1], vertical_alignment="bottom")
             with c_act_1:
                 move_query = st.text_input("Action Description:", placeholder="e.g. 'I sold the miter saw'", key="move_input")
             with c_act_2:
-                # Use secondary type for neutral look until action is needed
                 preview_btn = st.button("Preview", use_container_width=True)
 
-            # Logic checks
             if preview_btn and move_query:
                 with st.spinner("Analyzing..."):
                     my_tools_df = dm.get_my_tools(current_user['name'])
@@ -392,7 +397,6 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                         else:
                             st.toast("No matching tools found.", icon="🤷")
 
-            # Confirmation UI
             if st.session_state.get('pending_moves'):
                 st.markdown("#### 🛡️ Verify Changes")
                 df_review = pd.DataFrame(st.session_state['pending_moves'])
@@ -400,31 +404,25 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 
                 col_yes, col_no = st.columns(2)
                 
-                # Use standard button types (primary=colored, secondary=outline)
                 if col_yes.button("Confirm Update", type="primary", use_container_width=True):
                     count = 0
+                    last_bin = "New Location"
                     for change in st.session_state['pending_moves']:
-                        data = change['_data'] # Get raw data for action type
-                        
+                        data = change['_data']
                         if data.get('action') == 'RETIRE':
-                            # For retire, we trust the raw ID
-                            dm.retire_tool(change['ID'], data.get('reason', 'Retired'), current_user['name'])
+                            dm.retire_tool(data['tool_id'], data.get('reason', 'Retired'), current_user['name'])
                         else:
-                            # FIX: Use the calculated values (_bin, _house) we stored in the preview list
-                            dm.update_tool_location(change['ID'], change['_bin'], change['_house'], current_user['name'])
-                        
+                            dm.update_tool_location(data['tool_id'], data.get('new_bin'), data.get('new_household'), current_user['name'])
+                            last_bin = data.get('new_bin')
                         count += 1
                     
-                    st.toast(
-                        f"""
+                    st.toast(f"""
                         **✅ Update Complete**
                         
                         We moved **{count}** tools to:
                         
-                        `{change['_data'].get('new_bin', 'New Location')}`
-                        """,
-                        icon="📦"
-                    )
+                        `{last_bin}`
+                        """, icon="📦")
                     st.session_state['pending_moves'] = None
                     time.sleep(1)
                     st.rerun()
@@ -435,7 +433,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
 
         st.markdown("---")
 
-        # --- SECTION 2: SPREADSHEET EDITOR ---
+        # --- SPREADSHEET EDITOR ---
         st.subheader("📝 Edit Details")
         
         if current_user['role'] == "ADMIN":
@@ -445,7 +443,6 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
             edit_df = dm.get_my_tools(current_user['name'])
             st.caption("Editing ONLY tools you own.")
 
-        # CONFIG: Enable Selection
         edited_tools = st.data_editor(
             edit_df,
             column_config={
@@ -467,19 +464,9 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
             time.sleep(1)
             st.rerun()
 
-        # --- SECTION 3: HISTORY (Linked) ---
+        # --- HISTORY ---
         st.markdown("---")
-        
-        # Logic: Check if a row is selected in the editor above
-        # Streamlit stores selection in session state under the key + "selection"
-        # But data_editor returns the edited dataframe directly. 
-        # To get selection, we usually need a callback or specialized state handling.
-        # SIMPLER METHOD: Just let the user pick from the dropdown, but default to the first item if they clicked?
-        # Streamlit's data_editor doesn't return the "Selected Row" easily in this mode.
-        # Alternative: We stick to the Dropdown for History, BUT we sort it alphabetically so it's easy.
-        
         with st.expander("📜 View History / Audit Trail", expanded=False):
-            # Create a clean list of names
             tool_options = edit_df['name'].sort_values().unique()
             hist_tool_name = st.selectbox("Select tool history:", tool_options)
             
@@ -491,11 +478,14 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 else:
                     st.caption("No history records found.")
 
-        # --- SECTION 4: ADD NEW (Admin Only) ---
-        if current_user['role'] in ["ADMIN", "ADULT"]:
+        # --- ADD NEW (Admin Only) ---
+        if current_user['role'] == "ADMIN":
             st.markdown("---")
             st.subheader("Add New Tool")
             
+            if 'admin_error' in st.session_state and st.session_state['admin_error']:
+                st.error(st.session_state['admin_error'])
+
             with st.form("ai_prefill_form"):
                 c_ai_1, c_ai_2 = st.columns([1, 3], vertical_alignment="bottom")
                 with c_ai_1:
@@ -510,107 +500,85 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     with st.spinner("Analyzing..."):
                         ai_data = ai_parse_tool(raw_input)
                         if ai_data:
-                            st.session_state['form_name'] = ai_data.get('name', '')
-                            st.session_state['form_brand'] = ai_data.get('brand', '')
-                            st.session_state['form_model'] = ai_data.get('model_no', '')
-                            st.session_state['form_caps'] = ai_data.get('capabilities', '')
-                            st.session_state['form_stationary'] = ai_data.get('is_stationary', False)
+                            # UPDATE STATE
+                            st.session_state['tool_name'] = ai_data.get('name', '')
+                            st.session_state['tool_brand'] = ai_data.get('brand', '')
+                            st.session_state['tool_model'] = ai_data.get('model_no', '')
+                            st.session_state['tool_caps'] = ai_data.get('capabilities', '')
+                            st.session_state['tool_stationary'] = ai_data.get('is_stationary', False)
                             
                             try: 
-                                p_options = ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"]
-                                st.session_state['form_power_idx'] = p_options.index(ai_data.get('power_source', 'Manual'))
+                                p_list = ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"]
+                                # Check if returned value is valid, else default
+                                raw_power = ai_data.get('power_source', 'Manual')
+                                if raw_power in p_list:
+                                    st.session_state['tool_power'] = raw_power
+                                else:
+                                    st.session_state['tool_power'] = "Manual"
                             except: 
-                                st.session_state['form_power_idx'] = 0
+                                st.session_state['tool_power'] = "Manual"
 
                             try:
-                                st.session_state['form_safety_index'] = ["Open", "Supervised", "Adult Only"].index(ai_data.get('safety', 'Open'))
+                                s_list = ["Open", "Supervised", "Adult Only"]
+                                raw_safety = ai_data.get('safety', 'Open')
+                                if raw_safety in s_list:
+                                    st.session_state['tool_safety'] = raw_safety
+                                else:
+                                    st.session_state['tool_safety'] = "Open"
                             except:
-                                st.session_state['form_safety_index'] = 0
+                                st.session_state['tool_safety'] = "Open"
                             
                             if quick_owner:
-                                st.session_state['form_owner'] = quick_owner
-                                st.session_state['form_household'] = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0])
+                                st.session_state['tool_owner'] = quick_owner
+                                st.session_state['tool_household'] = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0])
                             
-                            st.toast("AI Generated Details - Check Step 2", icon="🤖")
-                            time.sleep(0.9)
+                            st.toast("AI Generated Details - Please Check for Accuracy.", icon="🤖")
                             st.rerun() 
                         else:
-                            st.error("AI could not generate details from description.")
-                else:
-                    st.error("Please paste a description.")
+                            st.error("AI could not generate details.")
 
+            # REAL FORM
             with st.form("add_tool"):
-                if 'form_name' not in st.session_state: st.session_state['form_name'] = ""
-                if 'form_brand' not in st.session_state: st.session_state['form_brand'] = ""
-                if 'form_model' not in st.session_state: st.session_state['form_model'] = ""
-                if 'form_caps' not in st.session_state: st.session_state['form_caps'] = ""
-                if 'form_stationary' not in st.session_state: st.session_state['form_stationary'] = False
-                if 'form_safety_index' not in st.session_state: st.session_state['form_safety_index'] = 0
-                if 'form_power_idx' not in st.session_state: st.session_state['form_power_idx'] = 0
+                # INIT SESSION STATE KEYS if missing
+                keys = ['tool_name', 'tool_brand', 'tool_model', 'tool_caps', 'tool_bin', 'tool_owner', 'tool_household', 'tool_power', 'tool_safety']
+                for k in keys:
+                    if k not in st.session_state: st.session_state[k] = ""
+                if 'tool_stationary' not in st.session_state: st.session_state['tool_stationary'] = False
                 
-                owner_idx = 0
-                if 'form_owner' in st.session_state and st.session_state['form_owner'] in ALL_OWNERS:
-                 owner_idx = ALL_OWNERS.index(st.session_state['form_owner'])
-                
-                house_idx = 0
-                if 'form_household' in st.session_state and st.session_state['form_household'] in ALL_HOUSEHOLDS:
-                 house_idx = ALL_HOUSEHOLDS.index(st.session_state['form_household'])
-
-                new_name = st.text_input("Tool Name", key="form_name")
-                
+                # Use SESSION STATE values directly for `value=` (Not Index)
+                st.text_input("Tool Name", key="tool_name")
                 c1, c2, c3 = st.columns(3)
-                with c1:
-                    new_brand = st.text_input("Brand", key="form_brand")
-                with c2:
-                    new_model = st.text_input("Model #", key="form_model")
-                with c3:
-                    new_power = st.selectbox("Power", ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"], index=st.session_state['form_power_idx'])
+                with c1: st.text_input("Brand", key="tool_brand")
+                with c2: st.text_input("Model #", key="tool_model")
+                with c3: 
+                    # Dropdown Logic: If session state is empty/invalid, default to first option
+                    curr_pow = st.session_state.get('tool_power')
+                    pow_opts = ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"]
+                    idx_pow = pow_opts.index(curr_pow) if curr_pow in pow_opts else 0
+                    st.selectbox("Power", pow_opts, index=idx_pow, key="tool_power")
 
                 c4, c5 = st.columns(2)
-                with c4:
-                    new_owner = st.selectbox("Owner", ALL_OWNERS, index=owner_idx, placeholder="Select owner...")
-                with c5:
-                    new_household = st.selectbox("Location", ALL_HOUSEHOLDS, index=house_idx, placeholder="Select household...")
+                with c4: 
+                    # Owner Logic
+                    curr_own = st.session_state.get('tool_owner')
+                    idx_own = ALL_OWNERS.index(curr_own) if curr_own in ALL_OWNERS else 0
+                    st.selectbox("Owner", ALL_OWNERS, index=idx_own, key="tool_owner")
+                with c5: 
+                    # Household Logic
+                    curr_house = st.session_state.get('tool_household')
+                    idx_house = ALL_HOUSEHOLDS.index(curr_house) if curr_house in ALL_HOUSEHOLDS else 0
+                    st.selectbox("Location", ALL_HOUSEHOLDS, index=idx_house, key="tool_household")
 
-                new_bin = st.text_input("Specific Location", placeholder="e.g. Garage - Shelf 2", key="form_bin")
+                st.text_input("Specific Location", placeholder="e.g. Garage - Shelf 2", key="tool_bin")
+                st.checkbox("Stationary Tool (Must be used on-site)", key="tool_stationary")
                 
-                new_stationary = st.checkbox("Stationary Tool (Must be used on-site)", value=st.session_state.get('form_stationary', False))
-
-                new_safety = st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], index=st.session_state['form_safety_index'])
-                new_caps = st.text_input("Capabilities", key="form_caps")
+                # Safety Logic
+                curr_safe = st.session_state.get('tool_safety')
+                safe_opts = ["Open", "Supervised", "Adult Only"]
+                idx_safe = safe_opts.index(curr_safe) if curr_safe in safe_opts else 0
+                st.selectbox("Safety", safe_opts, index=idx_safe, key="tool_safety")
                 
-                if st.form_submit_button("💾 Add to Tool Registry", use_container_width=True):
-                    if not new_owner or not new_household:
-                        st.error("⚠️ Please select Owner and Household")
-                    else:
-                        new_id = f"TOOL_{uuid.uuid4().hex[:6].upper()}"
-                        dm.con.execute("INSERT INTO tools VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
-                            (new_id, new_name, new_brand, new_model, new_power, new_owner, new_household, new_bin, new_stationary, 'Available', None, None, new_caps, new_safety))
-                        st.toast(
-                            f"""
-                            **💾 Tool Added**
-                            
-                            **{new_name}** has been added to the tool registry.
-                            """,
-                            icon="🛠️"
-                        )
-                        time.sleep(1)
-                        st.rerun()
-        st.markdown("---")
-        
-        # --- SECTION 5: MAINTENANCE ---
-        with st.expander("⚙️ Database Maintenance"):
-            st.caption("Keep the database lean by removing old audit logs.")
-            
-            col_m1, col_m2 = st.columns([3, 1], vertical_alignment="bottom")
-            with col_m1:
-                st.write("**Purge Old History:** Removes audit trails older than 30 days.")
-            with col_m2:
-                if st.button("🧹 Purge Now", use_container_width=True):
-                    with st.spinner("Cleaning up..."):
-                        deleted_count = dm.purge_old_history(days=30)
-                        time.sleep(1)
-                        if deleted_count > 0:
-                            st.toast(f"Cleanup Complete: Removed {deleted_count} old records.", icon="🗑️")
-                        else:
-                            st.toast("Database is already clean.", icon="✨")
+                st.text_input("Capabilities", key="tool_caps")
+                
+                # CALL THE CALLBACK ON CLICK
+                st.form_submit_button("💾 Add to Tool Registry", use_container_width=True, on_click=save_tool_callback)
