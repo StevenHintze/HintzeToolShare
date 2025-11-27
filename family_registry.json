@@ -1,7 +1,17 @@
 [
   {"name": "Steven", "role": "ADMIN", "household": "Steve and Sam's", "email": "sjhintze@gmail.com"},
   {"name": "Samantha", "role": "ADMIN", "household": "Steve and Sam's", "email": "hintze.samantha@gmail.com"},
-  {"name": "Shawn", "role": "ADULT", "household": "Shawn's", "email": "shawn@example.com"},
+  {"name": "Shawn", "role": "ADULT", "household": "Shawn's", "email": "shawn.hintze@gmail.com"},
   {"name": "Dwyer", "role": "CHILD", "household": "Steve and Sam's", "email": "dwyer@hintze.family"},
-  {"name": "Jerry", "role": "ADULT", "household": "Jerry and Beth", "email": "jbhintzefamily@gmail.com"}
+  {"name": "Jerry", "role": "ADULT", "household": "Jerry and Beth", "email": "jbhintzefamily@gmail.com"},
+  {"name": "Tessie", "role": "ADULT", "household": "Tessie's", "email": "hintzetess@gmail.com"},
+  {"name": "David", "role": "ADULT", "household": "Dave and Lindsay", "email": "hintze.david@gmail.com"},
+  {"name": "Bob", "role":"ADULT", "household": "Bob's", "email": "rahintze@hotmail.com"},
+  {"name": "Jason", "role": "ADULT", "household": "Jason and Caliegh", "email": "jasonandcaleigh@gmail.com"},
+  {"name": "Jeff", "role": "ADULT", "household": "Jeff's", "email": "jhintze745@gmail.com"},
+  {"name": "Katie", "role": "ADULT", "household": "Katie's", "email": "katiedhintze@gmail.com"},
+  {"name": "Tim", "role": "ADULT", "household": "Tim and K2", "email": "tmhintze@gmail.com"},
+  {"name": "Kristi", "role": "ADULT", "household": "Kristi's", "email": "kristixhintze@gmail.com"},
+  {"name": "Lindsay", "role": "ADULT", "household": "Dave and Lindsay", "email":"lindsayjhintze@gmail.com"},
+  {"name": "Jeremy", "role": "ADULT", "household": "Jeremy's", "email": "jphdrums@gmail.com"}
 ]
