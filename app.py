@@ -8,7 +8,7 @@ import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.21", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.22", page_icon="🛠️")
 
 # Initialize DB
 dm = DataManager()
@@ -30,7 +30,6 @@ except:
 
 # --- CALLBACKS ---
 def save_tool_callback():
-    """Handles saving and clearing the form safely."""
     if not st.session_state.get('tool_owner') or not st.session_state.get('tool_household'):
         st.session_state['admin_error'] = "⚠️ Please select an Owner and Location."
         return
@@ -56,7 +55,7 @@ def save_tool_callback():
         st.toast(f"**Saved:** {st.session_state['tool_name']}", icon="✅")
         st.session_state['admin_error'] = None
         
-        # Clear Text Fields
+        # Clear form
         st.session_state['tool_name'] = ""
         st.session_state['tool_brand'] = ""
         st.session_state['tool_model'] = ""
@@ -64,11 +63,8 @@ def save_tool_callback():
         st.session_state['tool_bin'] = ""
         st.session_state['tool_stationary'] = False
         st.session_state['ai_input'] = ""
-        
-        # Reset Dropdowns to logical defaults
         st.session_state['tool_power'] = "Manual"
         st.session_state['tool_safety'] = "Open"
-        # Note: We leave Owner/Household as-is (sticky) for easier bulk entry
         
     except Exception as e:
         st.session_state['admin_error'] = f"Error: {str(e)}"
@@ -77,7 +73,13 @@ def save_tool_callback():
 if "user_info" not in st.session_state:
     st.session_state["user_info"] = None
 
-cookie_email = cookie_manager.get(cookie="hfts_user")
+# FIX #1: LOGOUT FLAG
+# Check if we just logged out. If so, ignore the cookie to prevent auto-login loop.
+if st.session_state.get("logout_flag", False):
+    cookie_email = None
+    st.session_state["logout_flag"] = False # Reset for next time
+else:
+    cookie_email = cookie_manager.get(cookie="hfts_user")
 
 if st.session_state["user_info"] is None and cookie_email:
     user = dm.get_user_by_email(cookie_email)
@@ -99,7 +101,7 @@ def login():
             time.sleep(1)
             st.rerun()
         else:
-            st.error("Email not found in the Family Registry.")
+            st.error(f"Email '{email}' not found in registry.")
     else:
         st.error("Incorrect Family Password.")
 
@@ -124,6 +126,7 @@ st.sidebar.write(f"**House:** {current_user['household']}")
 if st.sidebar.button("Log Out"):
     cookie_manager.delete("hfts_user")
     st.session_state["user_info"] = None
+    st.session_state["logout_flag"] = True # Set flag to block auto-login on rerun
     time.sleep(1) 
     st.rerun()
 
@@ -134,7 +137,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
 
 current_tabs = st.tabs(tabs)
 
-# TAB 1: Inventory & Courier
+# TAB 1: Inventory
 with current_tabs[0]:
     st.header("Family Inventory")
     
@@ -353,7 +356,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
     with current_tabs[3]:
         st.header(f"Manage {current_user['name']}'s Inventory")
         
-        # --- QUICK ACTIONS ---
+        # --- SECTION 1: QUICK ACTIONS ---
         with st.container(border=True):
             st.subheader("⚡ Quick Actions")
             st.caption("Move, Sell, Donate, or Report Broken tools.")
@@ -381,13 +384,24 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                                     curr = my_tools_df[my_tools_df['id'] == tid].iloc[0]
                                     action = update.get('action', 'MOVE')
                                     
-                                    desc = f"❌ RETIRE ({update.get('reason', 'Gone')})" if action == "RETIRE" else f"📍 MOVE to {update.get('new_bin')}"
+                                    # FIX #2: FALLBACK HOUSEHOLD
+                                    # If database value is missing/empty, use the Owner's default household
+                                    current_house_val = curr['household']
+                                    if pd.isna(current_house_val) or current_house_val == "":
+                                        current_house_val = OWNER_HOMES.get(curr['owner'], "Main House")
+                                        
+                                    new_house = update.get('new_household') or current_house_val
+                                    new_bin = update.get('new_bin')
+                                    
+                                    desc = f"❌ RETIRE ({update.get('reason', 'Gone')})" if action == "RETIRE" else f"📍 MOVE to {new_bin}"
                                     
                                     proposed.append({
                                         "ID": tid,
                                         "Tool": curr['name'],
                                         "Action": desc,
-                                        "_data": update
+                                        "_data": update,
+                                        "_bin": new_bin,
+                                        "_house": new_house
                                     })
                         
                         if proposed:
@@ -411,8 +425,9 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                         if data.get('action') == 'RETIRE':
                             dm.retire_tool(data['tool_id'], data.get('reason', 'Retired'), current_user['name'])
                         else:
-                            dm.update_tool_location(data['tool_id'], data.get('new_bin'), data.get('new_household'), current_user['name'])
-                            last_bin = data.get('new_bin')
+                            # FIX #2: USE CALCULATED FALLBACK FROM PREVIEW
+                            dm.update_tool_location(change['ID'], change['_bin'], change['_house'], current_user['name'])
+                            last_bin = change['_bin']
                         count += 1
                     
                     st.toast(f"""
@@ -430,7 +445,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
 
         st.markdown("---")
 
-        # --- SPREADSHEET EDITOR ---
+        # --- SECTION 2: SPREADSHEET EDITOR ---
         st.subheader("📝 Edit Details")
         
         if current_user['role'] == "ADMIN":
@@ -461,7 +476,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
             time.sleep(1)
             st.rerun()
 
-        # --- HISTORY ---
+        # --- SECTION 3: HISTORY ---
         st.markdown("---")
         with st.expander("📜 View History / Audit Trail", expanded=False):
             tool_options = edit_df['name'].sort_values().unique()
@@ -475,12 +490,14 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 else:
                     st.caption("No history records found.")
 
-        # --- ADD NEW (Admin Only) ---
+        # --- SECTION 4: ADD NEW (Admin Only) ---
         if current_user['role'] == "ADMIN":
             st.markdown("---")
             st.subheader("Add New Tool")
             
-            # AI Auto-Fill Section
+            if 'admin_error' in st.session_state and st.session_state['admin_error']:
+                st.error(st.session_state['admin_error'])
+
             with st.form("ai_prefill_form"):
                 c_ai_1, c_ai_2 = st.columns([1, 3], vertical_alignment="bottom")
                 with c_ai_1:
@@ -502,16 +519,13 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                             st.session_state['tool_stationary'] = ai_data.get('is_stationary', False)
                             
                             try: 
-                                p_list = ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"]
-                                raw_p = ai_data.get('power_source', 'Manual')
-                                st.session_state['tool_power'] = raw_p if raw_p in p_list else "Manual"
+                                p_options = ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"]
+                                st.session_state['tool_power'] = p_options[p_options.index(ai_data.get('power_source', 'Manual'))]
                             except: 
                                 st.session_state['tool_power'] = "Manual"
 
                             try:
-                                s_list = ["Open", "Supervised", "Adult Only"]
-                                raw_s = ai_data.get('safety', 'Open')
-                                st.session_state['tool_safety'] = raw_s if raw_s in s_list else "Open"
+                                st.session_state['tool_safety'] = ["Open", "Supervised", "Adult Only"][["Open", "Supervised", "Adult Only"].index(ai_data.get('safety', 'Open'))]
                             except:
                                 st.session_state['tool_safety'] = "Open"
                             
@@ -526,47 +540,52 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 else:
                     st.error("Please paste a description.")
 
-            # Main Add Tool Form
             with st.form("add_tool"):
-                # Ensure keys exist with default values (FIX for yellow warning)
-                keys = ['tool_name', 'tool_brand', 'tool_model', 'tool_caps', 'tool_bin']
+                # Session Init
+                keys = ['tool_name', 'tool_brand', 'tool_model', 'tool_caps', 'tool_bin', 'tool_owner', 'tool_household', 'tool_power', 'tool_safety']
                 for k in keys:
                     if k not in st.session_state: st.session_state[k] = ""
-                
-                if 'tool_power' not in st.session_state: st.session_state['tool_power'] = "Manual"
-                if 'tool_safety' not in st.session_state: st.session_state['tool_safety'] = "Open"
                 if 'tool_stationary' not in st.session_state: st.session_state['tool_stationary'] = False
                 
-                # Default Owner Logic: If not set, pick first available
+                # Default Logic
                 if 'tool_owner' not in st.session_state or st.session_state['tool_owner'] not in ALL_OWNERS:
                     st.session_state['tool_owner'] = ALL_OWNERS[0] if ALL_OWNERS else None
-                
                 if 'tool_household' not in st.session_state or st.session_state['tool_household'] not in ALL_HOUSEHOLDS:
                     st.session_state['tool_household'] = ALL_HOUSEHOLDS[0] if ALL_HOUSEHOLDS else None
 
-                new_name = st.text_input("Tool Name", key="tool_name")
+                # Inputs
+                st.text_input("Tool Name", key="tool_name")
                 
                 c1, c2, c3 = st.columns(3)
-                with c1:
-                    new_brand = st.text_input("Brand", key="tool_brand")
-                with c2:
-                    new_model = st.text_input("Model #", key="tool_model")
-                with c3:
-                    # FIX: No index=... argument. The 'key' handles the default value from session state.
-                    new_power = st.selectbox("Power", ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"], key="tool_power")
+                with c1: st.text_input("Brand", key="tool_brand")
+                with c2: st.text_input("Model #", key="tool_model")
+                with c3: st.selectbox("Power", ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"], key="tool_power")
 
                 c4, c5 = st.columns(2)
-                with c4:
-                    new_owner = st.selectbox("Owner", ALL_OWNERS, key="tool_owner")
-                with c5:
-                    new_household = st.selectbox("Location", ALL_HOUSEHOLDS, key="tool_household")
+                with c4: st.selectbox("Owner", ALL_OWNERS, key="tool_owner")
+                with c5: st.selectbox("Location", ALL_HOUSEHOLDS, key="tool_household")
 
-                new_bin = st.text_input("Specific Location", placeholder="e.g. Garage - Shelf 2", key="tool_bin")
+                st.text_input("Specific Location", placeholder="e.g. Garage - Shelf 2", key="tool_bin")
+                st.checkbox("Stationary Tool (Must be used on-site)", key="tool_stationary")
+                st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], key="tool_safety")
+                st.text_input("Capabilities", key="tool_caps")
                 
-                new_stationary = st.checkbox("Stationary Tool (Must be used on-site)", key="tool_stationary")
-
-                new_safety = st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], key="tool_safety")
-                new_caps = st.text_input("Capabilities", key="tool_caps")
-                
-                # Submit with Callback
                 st.form_submit_button("💾 Add to Tool Registry", use_container_width=True, on_click=save_tool_callback)
+        
+        st.markdown("---")
+        
+        # --- SECTION 5: MAINTENANCE ---
+        with st.expander("⚙️ Database Maintenance"):
+            st.caption("Keep the database lean by removing old audit logs.")
+            col_m1, col_m2 = st.columns([3, 1], vertical_alignment="bottom")
+            with col_m1:
+                st.write("**Purge Old History:** Removes audit trails older than 30 days.")
+            with col_m2:
+                if st.button("🧹 Purge Now", use_container_width=True):
+                    with st.spinner("Cleaning up..."):
+                        deleted_count = dm.purge_old_history(days=30)
+                        time.sleep(1)
+                        if deleted_count > 0:
+                            st.toast(f"Cleanup Complete: Removed {deleted_count} old records.", icon="🗑️")
+                        else:
+                            st.toast("Database is already clean.", icon="✨")
