@@ -8,7 +8,7 @@ import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.22", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.25", page_icon="🛠️")
 
 # Initialize DB
 dm = DataManager()
@@ -139,7 +139,7 @@ current_tabs = st.tabs(tabs)
 
 # TAB 1: Inventory
 with current_tabs[0]:
-    st.header("Family Inventory")
+    st.header("Family Tool Registry")
     
     c1, c2 = st.columns([5, 1], vertical_alignment="bottom")
     with c1:
@@ -287,7 +287,7 @@ with current_tabs[2]:
         st.session_state["ai_recs"] = None
 
     if st.session_state["ai_recs"] is None:
-        st.info(f"Describe your job. I'll check your household, find loans, and identify missing items.")
+        st.info(f"Describe your job. I'll check your household tools, find ones you may need to borrow, and identify useful tools that are not in the family toolbox.")
         
         with st.form("project_form"):
             project_query = st.text_area("Describe your project:", placeholder="e.g. I need to rotate my tires and change the oil...")
@@ -295,7 +295,7 @@ with current_tabs[2]:
         
         if submit_search:
             if project_query:
-                with st.spinner("Consulting the inventory..."):
+                with st.spinner("Planning and Looking for Tools..."):
                     all_tools_df = dm.con.execute("SELECT * FROM tools").df()
                     recs = get_smart_recommendations(project_query, all_tools_df, current_user['household'])
                     if recs:
@@ -361,11 +361,14 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
             st.subheader("⚡ Quick Actions")
             st.caption("Move, Sell, Donate, or Report Broken tools.")
             
-            c_act_1, c_act_2 = st.columns([4, 1], vertical_alignment="bottom")
-            with c_act_1:
-                move_query = st.text_input("Action Description:", placeholder="e.g. 'I sold the miter saw'", key="move_input")
-            with c_act_2:
-                preview_btn = st.button("Preview", use_container_width=True)
+            # FIX: Wrapped in form so 'Enter' key works
+            with st.form("quick_action_form"):
+                c_act_1, c_act_2 = st.columns([4, 1], vertical_alignment="bottom")
+                with c_act_1:
+                    move_query = st.text_input("Action Description:", placeholder="e.g. 'I sold the miter saw'", key="move_input")
+                with c_act_2:
+                    # FIX: Renamed button to be more descriptive
+                    preview_btn = st.form_submit_button("Review Action", use_container_width=True)
 
             if preview_btn and move_query:
                 with st.spinner("Analyzing..."):
@@ -384,8 +387,6 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                                     curr = my_tools_df[my_tools_df['id'] == tid].iloc[0]
                                     action = update.get('action', 'MOVE')
                                     
-                                    # FIX #2: FALLBACK HOUSEHOLD
-                                    # If database value is missing/empty, use the Owner's default household
                                     current_house_val = curr['household']
                                     if pd.isna(current_house_val) or current_house_val == "":
                                         current_house_val = OWNER_HOMES.get(curr['owner'], "Main House")
@@ -425,7 +426,6 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                         if data.get('action') == 'RETIRE':
                             dm.retire_tool(data['tool_id'], data.get('reason', 'Retired'), current_user['name'])
                         else:
-                            # FIX #2: USE CALCULATED FALLBACK FROM PREVIEW
                             dm.update_tool_location(change['ID'], change['_bin'], change['_house'], current_user['name'])
                             last_bin = change['_bin']
                         count += 1
@@ -433,7 +433,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     st.toast(f"""
                         **✅ Update Complete**
                         
-                        Updated **{count}** tools.
+                        We processed **{count}** items.
                         """, icon="📦")
                     st.session_state['pending_moves'] = None
                     time.sleep(1)
@@ -489,15 +489,29 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     st.dataframe(history)
                 else:
                     st.caption("No history records found.")
+        
+        # --- SECTION 5: MAINTENANCE ---
+        st.markdown("---")
+        with st.expander("⚙️ Database Maintenance"):
+            st.caption("Keep the database lean by removing old audit logs.")
+            col_m1, col_m2 = st.columns([3, 1], vertical_alignment="bottom")
+            with col_m1:
+                st.write("**Purge Old History:** Removes audit trails older than 30 days.")
+            with col_m2:
+                if st.button("🧹 Purge Now", use_container_width=True):
+                    with st.spinner("Cleaning up..."):
+                        deleted_count = dm.purge_old_history(days=30)
+                        time.sleep(1)
+                        if deleted_count > 0:
+                            st.toast(f"Cleanup Complete: Removed {deleted_count} old records.", icon="🗑️")
+                        else:
+                            st.toast("Database is already clean.", icon="✨")
 
         # --- SECTION 4: ADD NEW (Admin Only) ---
         if current_user['role'] == "ADMIN":
             st.markdown("---")
             st.subheader("Add New Tool")
             
-            if 'admin_error' in st.session_state and st.session_state['admin_error']:
-                st.error(st.session_state['admin_error'])
-
             with st.form("ai_prefill_form"):
                 c_ai_1, c_ai_2 = st.columns([1, 3], vertical_alignment="bottom")
                 with c_ai_1:
@@ -541,19 +555,20 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     st.error("Please paste a description.")
 
             with st.form("add_tool"):
-                # Session Init
-                keys = ['tool_name', 'tool_brand', 'tool_model', 'tool_caps', 'tool_bin', 'tool_owner', 'tool_household', 'tool_power', 'tool_safety']
+                keys = ['tool_name', 'tool_brand', 'tool_model', 'tool_caps', 'tool_bin']
                 for k in keys:
                     if k not in st.session_state: st.session_state[k] = ""
+                
+                if 'tool_power' not in st.session_state: st.session_state['tool_power'] = "Manual"
+                if 'tool_safety' not in st.session_state: st.session_state['tool_safety'] = "Open"
                 if 'tool_stationary' not in st.session_state: st.session_state['tool_stationary'] = False
                 
-                # Default Logic
                 if 'tool_owner' not in st.session_state or st.session_state['tool_owner'] not in ALL_OWNERS:
                     st.session_state['tool_owner'] = ALL_OWNERS[0] if ALL_OWNERS else None
+                
                 if 'tool_household' not in st.session_state or st.session_state['tool_household'] not in ALL_HOUSEHOLDS:
                     st.session_state['tool_household'] = ALL_HOUSEHOLDS[0] if ALL_HOUSEHOLDS else None
 
-                # Inputs
                 st.text_input("Tool Name", key="tool_name")
                 
                 c1, c2, c3 = st.columns(3)
@@ -571,8 +586,6 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 st.text_input("Capabilities", key="tool_caps")
                 
                 st.form_submit_button("💾 Add to Tool Registry", use_container_width=True, on_click=save_tool_callback)
-        
-        st.markdown("---")
         
         # --- SECTION 5: MAINTENANCE ---
         with st.expander("⚙️ Database Maintenance"):
