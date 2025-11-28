@@ -17,18 +17,20 @@ def get_ai_advice(user_query, available_tools_df):
         brand = row.get('brand', '')
         model = row.get('model_no', '')
         details = f"{brand} {model}".strip()
-        tool_context += f"- {row['name']} [{details}] (Safety: {row['safety_rating']}, Caps: {row['capabilities']})\n"
+        stat_note = "[STATIONARY]" if row.get('is_stationary') else ""
+        
+        tool_context += f"- {row['name']} [{details}] {stat_note} (Safety: {row['safety_rating']}, Caps: {row['capabilities']})\n"
 
     prompt = f"""
     You are the "Hintze Family Tool Manager." 
     
     YOUR GOAL:
-    Analyze the user's project and recommend the best tools from the AVAILABLE INVENTORY below.
+    Analyze the user's project and recommend the best tools.
     
     RULES:
     1. ONLY recommend tools listed in the INVENTORY.
-    2. Be practical and concise.
-    3. If a tool is "Adult Only" and the project seems risky, add a brief safety reminder.
+    2. If a tool is marked [STATIONARY], warn the user they must go to the tool's location to use it.
+    3. Be practical and concise.
     
     INVENTORY (Currently Available):
     {tool_context}
@@ -45,15 +47,11 @@ def get_ai_advice(user_query, available_tools_df):
         return f"⚠️ AI Error: {str(e)}"
 
 def get_smart_recommendations(user_query, available_tools_df, user_household):
-    """
-    Analyzes project and returns structured JSON with 4 categories of tools.
-    """
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     except Exception as e:
         return None
 
-    # 1. Prepare Inventory Context
     inventory_list = []
     for index, row in available_tools_df.iterrows():
         status_detail = "Available"
@@ -73,24 +71,19 @@ def get_smart_recommendations(user_query, available_tools_df, user_household):
     
     inventory_json = json.dumps(inventory_list)
 
-    # 2. The Updated Prompt
     prompt = f"""
     You are the Hintze Family Tool Manager.
     USER PROJECT: "{user_query}"
     USER'S HOUSEHOLD: "{user_household}"
     
     YOUR TASK:
-    Analyze the project. List the tools needed. Cross-reference with the INVENTORY JSON.
+    Identify the best tools for the job and categorize them.
     
     CATEGORIES:
     1. "locate": Tools the user OWNS (same household).
     2. "track_down": Tools the user OWNS but are currently BORROWED.
-    3. "borrow": Tools the user DOES NOT OWN but exist in the inventory.
-    4. "missing": Essential tools for this job that are NOT in the inventory.
-    
-    STRICT RULES:
-    - Do NOT invent tools. If it's not in the JSON, it goes in "missing".
-    - If a critical tool is "missing", advise if the job is safe to proceed without it or if they need to buy/rent it.
+    3. "borrow": Tools the user DOES NOT OWN.
+    4. "missing": Essential tools NOT in inventory.
     
     INVENTORY JSON:
     {inventory_json}
@@ -110,9 +103,9 @@ def get_smart_recommendations(user_query, available_tools_df, user_household):
         ],
         "missing_list": [
             {{
-                "tool_name": "Generic Name (e.g. Floor Jack)",
+                "tool_name": "Name",
                 "importance": "Critical/Optional",
-                "advice": "Buy this or use the bottle jack from your truck"
+                "advice": "..."
             }}
         ]
     }}
@@ -127,9 +120,6 @@ def get_smart_recommendations(user_query, available_tools_df, user_household):
         return None
 
 def ai_filter_inventory(user_query, inventory_df):
-    """
-    Filters the inventory based on natural language. Returns list of Tool IDs.
-    """
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     except:
@@ -137,22 +127,14 @@ def ai_filter_inventory(user_query, inventory_df):
 
     context = ""
     for index, row in inventory_df.iterrows():
-        status_str = f"Borrowed by {row['borrower']}" if row['status'] == 'Borrowed' else "Available"
-        context += f"ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']} | Cap: {row['capabilities']} | Status: {status_str}\n"
+        context += f"ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']} | Cap: {row['capabilities']}\n"
 
     prompt = f"""
     You are an Inventory Search Engine.
     QUERY: "{user_query}"
     INVENTORY:
     {context}
-    
-    TASK:
-    Return a JSON list of Tool IDs that match the query.
-    - If user asks "What has Shawn borrowed?", find items with Status "Borrowed by Shawn".
-    - If user asks "Automotive", find items with capabilities related to cars/trucks.
-    
-    OUTPUT JSON:
-    {{ "match_ids": ["ID1", "ID2"] }}
+    TASK: Return a JSON list of Tool IDs {{ "match_ids": [...] }} that match the query.
     """
     
     try:
@@ -171,18 +153,19 @@ def ai_parse_tool(raw_text):
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         model = genai.GenerativeModel('gemini-2.5-flash')
         
+        # UPDATED: Explicit instruction for Title Case
         prompt = f"""
-        You are an inventory assistant. Analyze this tool description and extract structured data.
+        You are an inventory assistant. Analyze this tool description.
         INPUT TEXT: "{raw_text}"
         REQUIREMENTS:
-        1. Name: Clean, concise tool name.
+        1. Name: Clean, concise tool name. Use Title Case (e.g. "DeWalt Impact Driver"). Do NOT use ALL CAPS or all lowercase.
         2. Brand: The manufacturer.
         3. Model: The specific model number.
-        4. Power: Choose one: "Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic".
+        4. Power: "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic", or "Manual".
         5. Safety: "Open", "Supervised", or "Adult Only".
         6. Capabilities: A clean string of 3-5 comma-separated keywords.
-        7. Stationary: Boolean (true/false). True if the tool is too large/heavy to move easily (e.g. 60gal compressor, car lift, cabinet saw). False for portable tools.
-
+        7. Stationary: Boolean (true/false). True if the tool is very large/heavy/mounted.
+        
         OUTPUT FORMAT:
         Return ONLY valid JSON.
         {{
@@ -191,7 +174,7 @@ def ai_parse_tool(raw_text):
             "model_no": "...",
             "power_source": "...",
             "safety": "...",
-            "capabilities": "..."
+            "capabilities": "...",
             "is_stationary": true/false
         }}
         """
@@ -209,7 +192,6 @@ def parse_location_update(user_query, user_tools_df):
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        # Mini-Context
         tool_list_str = ""
         for index, row in user_tools_df.iterrows():
             tool_list_str += f"- ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']}\n"
