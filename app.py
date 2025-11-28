@@ -2,14 +2,13 @@ import streamlit as st
 import extra_streamlit_components as stx
 from data_manager import DataManager
 from tools_registry import check_safety 
-# IMPORT ALL 6 FUNCTIONS
 from gemini_helper import ai_parse_tool, get_ai_advice, get_smart_recommendations, ai_filter_inventory, parse_location_update, check_duplicate_tool
 import time
 import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v1.0", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.29", page_icon="🛠️")
 
 # Initialize DB
 dm = DataManager()
@@ -94,21 +93,18 @@ def save_tool_callback():
 if "user_info" not in st.session_state:
     st.session_state["user_info"] = None
 
-# Check for Logout Flag
 if st.session_state.get("logout_flag", False):
     cookie_token = None
     st.session_state["logout_flag"] = False 
 else:
-    cookie_token = cookie_manager.get(cookie="hfts_session") # SECURE TOKEN
+    cookie_token = cookie_manager.get(cookie="hfts_session")
 
 if st.session_state["user_info"] is None and cookie_token:
-    # Validate TOKEN (Secure) instead of Email
     user = dm.get_user_from_session(cookie_token)
     if user:
         st.session_state["user_info"] = user
         st.query_params.clear()
     else:
-        # Invalid token (expired/revoked)
         cookie_manager.delete("hfts_session")
 
 def login():
@@ -120,12 +116,9 @@ def login():
         if user:
             dm.log_event("LOGIN", email, "Successful login")
             st.session_state["user_info"] = user
-            
-            # CREATE SECURE SESSION
             token = dm.create_session(email)
             expires = datetime.datetime.now() + datetime.timedelta(days=7)
             cookie_manager.set("hfts_session", token, expires_at=expires)
-            
             st.success(f"Welcome back, {user['name']}!")
             time.sleep(1)
             st.rerun()
@@ -159,7 +152,7 @@ st.sidebar.write(f"**House:** {current_user['household']}")
 if st.sidebar.button("Log Out"):
     cookie_token = cookie_manager.get(cookie="hfts_session")
     if cookie_token:
-        dm.revoke_session(cookie_token) # Revoke server-side
+        dm.revoke_session(cookie_token)
     cookie_manager.delete("hfts_session")
     st.session_state["user_info"] = None
     st.session_state["logout_flag"] = True 
@@ -175,7 +168,7 @@ current_tabs = st.tabs(tabs)
 
 # TAB 1: Inventory & Courier
 with current_tabs[0]:
-    st.header("Family Inventory")
+    st.header("Family Tool Registry")
     c1, c2 = st.columns([5, 1], vertical_alignment="bottom")
     with c1:
         query = st.text_input("🔎 Search or Ask...", placeholder="e.g. 'Automotive tools' or 'What has Shawn borrowed?'")
@@ -235,7 +228,6 @@ with current_tabs[0]:
                     dm.borrow_tool(tool_row['id'], current_user['name'], days)
                     st.success(f"✅ You borrowed the {target_tool_name}!")
                     
-                    # Courier Logic
                     pickup_household = tool_row['household']
                     resident_name = None
                     for owner, house in OWNER_HOMES.items():
@@ -308,7 +300,7 @@ with current_tabs[2]:
     if st.session_state["ai_recs"] is None:
         st.info(f"Describe your job. I'll check your household tools, find ones you may need to borrow, and identify useful tools that are not in the family toolbox.")
         with st.form("project_form"):
-            project_query = st.text_area("Describe your project:", placeholder="e.g. I need to rotate my tires...")
+            project_query = st.text_area("Describe your project:", placeholder="e.g. I need to rotate my tires and change the oil...")
             submit_search = st.form_submit_button("Analyze Needs")
         
         if submit_search and project_query:
@@ -358,6 +350,11 @@ with current_tabs[2]:
                         st.session_state["ai_recs"] = None
                         time.sleep(2)
                         st.rerun()
+                    else:
+                        st.warning("No tools selected.")
+        
+        elif not recs.get('missing_list'):
+            st.info("Looks like you have everything you need at home! Good luck.")
 
 # TAB 4: Manage Toolbox
 if current_user['role'] in ["ADMIN", "ADULT"]:
@@ -411,8 +408,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     count = 0
                     for change in st.session_state['pending_moves']:
                         data = change['_data']
-                        details = f"{change['Action']} on {change['Tool']}"
-                        dm.log_event("ADMIN_UPDATE", current_user['name'], details)
+                        dm.log_event("ADMIN_UPDATE", current_user['name'], f"{change['Action']} on {change['Tool']}")
                         if data.get('action') == 'RETIRE':
                             dm.retire_tool(change['ID'], data.get('reason', 'Retired'), current_user['name'])
                         else:
@@ -489,7 +485,8 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     if not house_tools.empty:
                         dup = check_duplicate_tool(ai_data, house_tools)
                         if dup and dup.get('is_duplicate'):
-                            st.session_state['dup_warning'] = f"⚠️ **Possible Duplicate:** Similar to **{dup['match_name']}**."
+                            # UPDATED MESSAGE:
+                            st.session_state['dup_warning'] = f"⚠️ **Possible Duplicate:** Similar to **{dup['match_name']}** already in **{target_house}**."
                         else: st.session_state['dup_warning'] = None
                     else: st.session_state['dup_warning'] = None
 
