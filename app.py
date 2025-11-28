@@ -486,7 +486,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                         dup = check_duplicate_tool(ai_data, house_tools)
                         if dup and dup.get('is_duplicate'):
                             # UPDATED MESSAGE:
-                            st.session_state['dup_warning'] = f"⚠️ **Possible Duplicate:** Similar to **{dup['match_name']}** already in **{target_house}**."
+                            st.session_state['dup_warning'] = f"⚠️ **Possible Duplicate:** Similar to **{dup['match_name']}** already in **{target_house}** household."
                         else: st.session_state['dup_warning'] = None
                     else: st.session_state['dup_warning'] = None
 
