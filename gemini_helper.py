@@ -225,3 +225,51 @@ def parse_location_update(user_query, user_tools_df):
         return json.loads(clean_text)
     except:
         return None
+        
+def check_duplicate_tool(new_tool_data, inventory_df):
+    """
+    Compares a potential new tool against the existing database to find duplicates.
+    """
+    try:
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        
+        # Create a lightweight list of existing tools (Name/Brand/Model) to save tokens
+        # We filter out tools with empty names to be safe
+        existing_list = []
+        for index, row in inventory_df.iterrows():
+            existing_list.append(f"ID: {row['id']} | {row['name']} | {row['brand']} | {row['model_no']}")
+        
+        existing_str = "\n".join(existing_list)
+        
+        new_tool_str = f"{new_tool_data.get('name')} | {new_tool_data.get('brand')} | {new_tool_data.get('model_no')}"
+        
+        prompt = f"""
+        You are a Data Integrity Agent. Check for duplicates.
+        
+        NEW TOOL BEING ADDED:
+        {new_tool_str}
+        
+        EXISTING INVENTORY:
+        {existing_str}
+        
+        YOUR TASK:
+        Does the NEW TOOL look like a duplicate of any item in the EXISTING INVENTORY?
+        - Strict Check: Matching Model Number is a definite duplicate.
+        - Fuzzy Check: Matching Name + Brand is a likely duplicate.
+        - Ignore generic overlaps (e.g. "Hammer" vs "Sledgehammer" is NOT a duplicate).
+        
+        OUTPUT JSON:
+        {{
+            "is_duplicate": true/false,
+            "match_name": "Name of the existing tool found",
+            "match_owner": "Owner of existing tool",
+            "reason": "Why you think it's a match"
+        }}
+        """
+        
+        response = model.generate_content(prompt)
+        clean_text = response.text.replace("```json", "").replace("```", "").strip()
+        return json.loads(clean_text)
+    except:
+        return None
