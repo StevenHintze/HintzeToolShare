@@ -225,7 +225,7 @@ def parse_location_update(user_query, user_tools_df):
         return json.loads(clean_text)
     except:
         return None
-        
+
 def check_duplicate_tool(new_tool_data, inventory_df):
     """
     Compares a potential new tool against the existing database to find duplicates.
@@ -234,11 +234,10 @@ def check_duplicate_tool(new_tool_data, inventory_df):
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        # Create a lightweight list of existing tools (Name/Brand/Model) to save tokens
-        # We filter out tools with empty names to be safe
+        # UPDATED CONTEXT: Now includes Owner and Household so AI doesn't guess
         existing_list = []
         for index, row in inventory_df.iterrows():
-            existing_list.append(f"ID: {row['id']} | {row['name']} | {row['brand']} | {row['model_no']}")
+            existing_list.append(f"ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']} | Model: {row['model_no']} | Owner: {row['owner']} | House: {row['household']}")
         
         existing_str = "\n".join(existing_list)
         
@@ -247,23 +246,23 @@ def check_duplicate_tool(new_tool_data, inventory_df):
         prompt = f"""
         You are a Data Integrity Agent. Check for duplicates.
         
-        NEW TOOL BEING ADDED:
+        NEW TOOL CANDIDATE:
         {new_tool_str}
         
-        EXISTING INVENTORY:
+        EXISTING HOUSEHOLD INVENTORY:
         {existing_str}
         
         YOUR TASK:
         Does the NEW TOOL look like a duplicate of any item in the EXISTING INVENTORY?
         - Strict Check: Matching Model Number is a definite duplicate.
         - Fuzzy Check: Matching Name + Brand is a likely duplicate.
-        - Ignore generic overlaps (e.g. "Hammer" vs "Sledgehammer" is NOT a duplicate).
         
         OUTPUT JSON:
         {{
             "is_duplicate": true/false,
             "match_name": "Name of the existing tool found",
-            "match_owner": "Owner of existing tool",
+            "match_owner": "Owner name from the list above",
+            "match_household": "Household name from the list above",
             "reason": "Why you think it's a match"
         }}
         """

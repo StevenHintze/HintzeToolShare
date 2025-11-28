@@ -564,19 +564,33 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                             st.session_state['tool_caps'] = ai_data.get('capabilities', '')
                             st.session_state['tool_stationary'] = ai_data.get('is_stationary', False)
                             
-                            # Reset warning
-                            st.session_state['dup_warning'] = None
+                            # Determine Target Household FIRST
+                            target_house = ALL_HOUSEHOLDS[0] # Default
+                            if quick_owner:
+                                st.session_state['tool_owner'] = quick_owner
+                                target_house = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0])
+                                st.session_state['tool_household'] = target_house
+                            
+                            # DUPLICATE CHECK (Scoped to Household)
+                            all_tools = dm.con.execute("SELECT * FROM tools").df()
+                            
+                            # Filter: Only look for duplicates in the SAME household
+                            household_tools = all_tools[all_tools['household'] == target_house]
+                            
+                            if not household_tools.empty:
+                                dup_check = check_duplicate_tool(ai_data, household_tools)
+                                if dup_check and dup_check.get('is_duplicate'):
+                                    # Updated Message with Correct Owner/House
+                                    match_own = dup_check.get('match_owner', 'Unknown')
+                                    match_house = dup_check.get('match_household', 'Unknown')
+                                    msg = f"⚠️ **Possible Duplicate:** Similar to **{dup_check['match_name']}** (Owned by {match_own} at {match_house})."
+                                    st.session_state['dup_warning'] = msg
+                                else:
+                                    st.session_state['dup_warning'] = None
+                            else:
+                                st.session_state['dup_warning'] = None
 
-                            # DUPLICATE CHECK START
-                            from gemini_helper import check_duplicate_tool
-                            all_tools = dm.con.execute("SELECT * FROM tools").df() # Get fresh inventory
-                            dup_check = check_duplicate_tool(ai_data, all_tools)
-                            
-                            if dup_check and dup_check.get('is_duplicate'):
-                                msg = f"⚠️ **Possible Duplicate:** Similar to **{dup_check['match_name']}** (Owned by {dup_check.get('match_owner', 'Unknown')})."
-                                st.session_state['dup_warning'] = msg
-                            # DUPLICATE CHECK END
-                            
+                            # ... (Keep the rest of the power/safety mapping logic exactly the same) ...
                             try: 
                                 p_list = ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"]
                                 raw_p = ai_data.get('power_source', 'Manual')
@@ -591,14 +605,10 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                             except:
                                 st.session_state['tool_safety'] = "Open"
                             
-                            if quick_owner:
-                                st.session_state['tool_owner'] = quick_owner
-                                st.session_state['tool_household'] = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0])
-                            
                             st.toast("AI Generated Details - Please Check for Accuracy.", icon="🤖")
                             st.rerun() 
                         else:
-                            st.error("AI could not generate details from description.")
+                            st.error("AI could not generate details.")
                 else:
                     st.error("Please paste a description.")
 
