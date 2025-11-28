@@ -4,6 +4,7 @@ import pandas as pd
 import uuid
 import json
 import datetime
+import requests # <--- Critical for Discord Webhooks
 
 class DataManager:
     def __init__(self):
@@ -19,6 +20,7 @@ class DataManager:
         self._init_schema()
 
     def _init_schema(self):
+        # 1. Tools Table
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS tools (
                 id VARCHAR PRIMARY KEY,
@@ -38,6 +40,7 @@ class DataManager:
             )
         """)
         
+        # 2. Family Table
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS family (
                 name VARCHAR,
@@ -47,6 +50,7 @@ class DataManager:
             )
         """)
 
+        # 3. History Table
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS tool_history (
                 history_id VARCHAR,
@@ -57,13 +61,24 @@ class DataManager:
             )
         """)
         
-        # Sessions table for security
+        # 4. Sessions Table
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 token VARCHAR PRIMARY KEY,
                 email VARCHAR,
                 created_at TIMESTAMP,
                 expires_at TIMESTAMP
+            )
+        """)
+
+        # 5. Audit Log Table (Security)
+        self.con.execute("""
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                log_id VARCHAR PRIMARY KEY,
+                timestamp TIMESTAMP,
+                event_type VARCHAR,
+                user_email VARCHAR,
+                details VARCHAR
             )
         """)
 
@@ -118,7 +133,6 @@ class DataManager:
             """, [row['name'], row['brand'], row['model_no'], row['household'], row['bin_location'], row['capabilities'], row['safety_rating'], row['id']])
 
     def purge_old_history(self, days=30):
-        """ THIS IS THE MISSING FUNCTION """
         # 1. Count them first
         count = self.con.execute(f"""
             SELECT count(*) FROM tool_history 
@@ -132,6 +146,38 @@ class DataManager:
                 WHERE change_date < current_timestamp - INTERVAL '{days} days'
             """)
         return count
+
+    # --- Security Logging ---
+    def log_event(self, event_type, email, details):
+        """Writes an event to DB and optionally sends an alert."""
+        log_id = str(uuid.uuid4())
+        self.con.execute("INSERT INTO audit_logs VALUES (?, current_timestamp, ?, ?, ?)", 
+                         [log_id, event_type, email, details])
+        
+        # Trigger Webhook for important events
+        if event_type in ["FAILED_LOGIN", "ADMIN_UPDATE"] or "RETIRE" in details:
+            self._send_discord_alert(event_type, email, details)
+
+    def _send_discord_alert(self, event_type, email, details):
+        """Private helper to fire the webhook."""
+        webhook_url = st.secrets.get("DISCORD_WEBHOOK")
+        if not webhook_url: return
+
+        emojis = {"FAILED_LOGIN": "🚨", "LOGIN": "🟢", "ADMIN_UPDATE": "🛠️", "RETIRE": "💀"}
+        icon = emojis.get(event_type, "ℹ️")
+        
+        data = {
+            "content": f"{icon} **{event_type}** detected!",
+            "embeds": [{
+                "title": "Security Event",
+                "description": f"**User:** {email}\n**Details:** {details}",
+                "color": 16711680 if event_type == "FAILED_LOGIN" else 3066993
+            }]
+        }
+        try:
+            requests.post(webhook_url, json=data)
+        except:
+            pass # Fail silently if discord is down
 
     # --- Standard Methods ---
     def borrow_tool(self, tool_id, user, days):
@@ -166,58 +212,9 @@ class DataManager:
 
     def revoke_session(self, token):
         self.con.execute("DELETE FROM sessions WHERE token = ?", [token])
+    
+    def clean_old_sessions(self):
+        self.con.execute("DELETE FROM sessions WHERE expires_at < current_timestamp")
 
     def seed_data(self, tools_list, family_list):
         pass
-    self.con.execute("""
-            CREATE TABLE IF NOT EXISTS audit_logs (
-                log_id VARCHAR PRIMARY KEY,
-                timestamp TIMESTAMP,
-                event_type VARCHAR, -- 'LOGIN', 'FAILED_LOGIN', 'ADMIN_ACTION'
-                user_email VARCHAR,
-                details VARCHAR
-            )
-        """)
-
-    # --- SECURITY LOGGING ---
-    def log_event(self, event_type, email, details):
-        """Writes an event to DB and optionally sends an alert."""
-        import uuid
-        import requests # You might need to add 'requests' to requirements.txt
-        
-        # 1. Write to Database (The Permanent Record)
-        log_id = str(uuid.uuid4())
-        self.con.execute("INSERT INTO audit_logs VALUES (?, current_timestamp, ?, ?, ?)", 
-                         [log_id, event_type, email, details])
-        
-        # 2. Check for High Priority Alerts (The Push Notification)
-        # Alert on: Failures, Admin actions, or specific keywords
-        if event_type in ["FAILED_LOGIN", "ADMIN_UPDATE"] or "RETIRE" in details:
-            self._send_discord_alert(event_type, email, details)
-
-    def _send_discord_alert(self, event_type, email, details):
-        """Private helper to fire the webhook."""
-        webhook_url = st.secrets.get("DISCORD_WEBHOOK")
-        if not webhook_url: return
-
-        # Emoji map
-        emojis = {
-            "FAILED_LOGIN": "🚨", 
-            "LOGIN": "🟢", 
-            "ADMIN_UPDATE": "🛠️",
-            "RETIRE": "💀"
-        }
-        icon = emojis.get(event_type, "ℹ️")
-        
-        data = {
-            "content": f"{icon} **{event_type}** detected!",
-            "embeds": [{
-                "title": "Security Event",
-                "description": f"**User:** {email}\n**Details:** {details}",
-                "color": 16711680 if event_type == "FAILED_LOGIN" else 3066993
-            }]
-        }
-        try:
-            requests.post(webhook_url, json=data)
-        except:
-            pass # Fail silently if discord is down
