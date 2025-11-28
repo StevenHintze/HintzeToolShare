@@ -8,7 +8,27 @@ import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.27", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.28", page_icon="🛠️")
+
+# --- CUSTOM CSS: GLASS TOASTS ---
+st.markdown("""
+    <style>
+        div[data-testid="stToast"] {
+            background-color: rgba(255, 215, 0, 0.95) !important; /* DeWalt Gold - High Opacity */
+            color: #000000 !important; /* Black Text for Contrast */
+            backdrop-filter: blur(12px); /* Glass Blur Effect */
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.3); /* Subtle white border */
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3); /* Deep shadow for pop */
+            border-radius: 12px;
+        }
+        /* Make the text bold for readability */
+        div[data-testid="stToast"] p {
+            font-weight: 600;
+            font-size: 16px;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
 # Initialize DB
 dm = DataManager()
