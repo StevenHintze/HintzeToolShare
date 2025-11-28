@@ -8,7 +8,7 @@ import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.25", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.26", page_icon="🛠️")
 
 # Initialize DB
 dm = DataManager()
@@ -93,15 +93,22 @@ def login():
     if password == st.secrets["FAMILY_PASSWORD"]:
         user = dm.get_user_by_email(email)
         if user:
-            st.session_state["user_info"] = user
-            expires = datetime.datetime.now() + datetime.timedelta(days=30)
-            cookie_manager.set("hfts_user", email, expires_at=expires)
-            st.success(f"Welcome back, {user['name']}!")
-            time.sleep(1)
-            st.rerun()
+            # SUCCESS
+            dm.log_event("LOGIN", email, "Successful login via Password")
+            if user:
+                st.session_state["user_info"] = user
+                expires = datetime.datetime.now() + datetime.timedelta(days=30)
+                cookie_manager.set("hfts_user", email, expires_at=expires)
+                st.success(f"Welcome back, {user['name']}!")
+                time.sleep(1)
+                st.rerun()
         else:
+            # UNKNOWN EMAIL
+            dm.log_event("FAILED_LOGIN", email, "Correct password, but Email not in registry") # <--- ALERT
             st.error(f"Email '{email}' not found in registry.")
     else:
+        # WRONG PASSWORD
+        dm.log_event("FAILED_LOGIN", email, "Invalid Password Attempt") # <--- ALERT
         st.error("Incorrect Family Password.")
 
 if st.session_state["user_info"] is None:
@@ -426,6 +433,10 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                             dm.update_tool_location(change['ID'], change['_bin'], change['_house'], current_user['name'])
                             last_bin = change['_bin']
                         count += 1
+                        # LOG IT
+                        action_type = "ADMIN_UPDATE"
+                        details = f"{change['Action']} on {change['Tool']}"
+                        dm.log_event(action_type, current_user['name'], details)
                     
                     st.toast(f"""
                         **✅ Update Complete**

@@ -169,3 +169,55 @@ class DataManager:
 
     def seed_data(self, tools_list, family_list):
         pass
+    self.con.execute("""
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                log_id VARCHAR PRIMARY KEY,
+                timestamp TIMESTAMP,
+                event_type VARCHAR, -- 'LOGIN', 'FAILED_LOGIN', 'ADMIN_ACTION'
+                user_email VARCHAR,
+                details VARCHAR
+            )
+        """)
+
+    # --- SECURITY LOGGING ---
+    def log_event(self, event_type, email, details):
+        """Writes an event to DB and optionally sends an alert."""
+        import uuid
+        import requests # You might need to add 'requests' to requirements.txt
+        
+        # 1. Write to Database (The Permanent Record)
+        log_id = str(uuid.uuid4())
+        self.con.execute("INSERT INTO audit_logs VALUES (?, current_timestamp, ?, ?, ?)", 
+                         [log_id, event_type, email, details])
+        
+        # 2. Check for High Priority Alerts (The Push Notification)
+        # Alert on: Failures, Admin actions, or specific keywords
+        if event_type in ["FAILED_LOGIN", "ADMIN_UPDATE"] or "RETIRE" in details:
+            self._send_discord_alert(event_type, email, details)
+
+    def _send_discord_alert(self, event_type, email, details):
+        """Private helper to fire the webhook."""
+        webhook_url = st.secrets.get("DISCORD_WEBHOOK")
+        if not webhook_url: return
+
+        # Emoji map
+        emojis = {
+            "FAILED_LOGIN": "🚨", 
+            "LOGIN": "🟢", 
+            "ADMIN_UPDATE": "🛠️",
+            "RETIRE": "💀"
+        }
+        icon = emojis.get(event_type, "ℹ️")
+        
+        data = {
+            "content": f"{icon} **{event_type}** detected!",
+            "embeds": [{
+                "title": "Security Event",
+                "description": f"**User:** {email}\n**Details:** {details}",
+                "color": 16711680 if event_type == "FAILED_LOGIN" else 3066993
+            }]
+        }
+        try:
+            requests.post(webhook_url, json=data)
+        except:
+            pass # Fail silently if discord is down
