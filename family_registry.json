@@ -4,7 +4,7 @@
   {"name": "Shawn", "role": "ADULT", "household": "Shawn's", "email": "shawn.hintze@gmail.com"},
   {"name": "Dwyer", "role": "CHILD", "household": "Steve and Sam's", "email": "dwyer@hintze.family"},
   {"name": "Jerry", "role": "ADULT", "household": "Jerry and Beth", "email": "jbhintzefamily@gmail.com"},
-  {"name": "Tessie", "role": "ADULT", "household": "Tessie's", "email": "hintzetess@gmail.com"},
+  {"name": "Tessie", "role": "ADULT", "household": "Tessie and Jake", "email": "hintzetess@gmail.com"},
   {"name": "David", "role": "ADULT", "household": "Dave and Lindsay", "email": "hintze.david@gmail.com"},
   {"name": "Bob", "role":"ADULT", "household": "Bob's", "email": "rahintze@hotmail.com"},
   {"name": "Jason", "role": "ADULT", "household": "Jason and Caliegh", "email": "jasonandcaleigh@gmail.com"},
@@ -14,4 +14,5 @@
   {"name": "Kristi", "role": "ADULT", "household": "Kristi's", "email": "kristixhintze@gmail.com"},
   {"name": "Lindsay", "role": "ADULT", "household": "Dave and Lindsay", "email":"lindsayjhintze@gmail.com"},
   {"name": "Jeremy", "role": "ADULT", "household": "Jeremy's", "email": "jphdrums@gmail.com"}
+  {"name": "Jake", "role":"ADULT", "household": "Tessie and Jake", "email": "hinesj2015@gmail.com"}
 ]
