@@ -487,8 +487,8 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 else:
                     st.caption("No history records found.")
         
-        # --- SECTION 4: ADD NEW (Admin Only) ---
-        if current_user['role'] == "ADMIN":
+        # --- SECTION 4: ADD NEW (Admin and Adult Only) ---
+        if current_user['role'] in ["ADMIN", "ADLUT"]:
             st.markdown("---")
             st.subheader("Add New Tool")
             
