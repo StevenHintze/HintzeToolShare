@@ -385,7 +385,7 @@ with current_tabs[2]:
         elif not recs.get('missing_list'):
             st.info("Looks like you have everything you need at home! Good luck.")
 
-# TAB 4: Manage Your Toolbox
+# TAB 4: Manage Inventory
 if current_user['role'] in ["ADMIN", "ADULT"]:
     with current_tabs[3]:
         st.header(f"Manage {current_user['name']}'s Inventory")
@@ -458,7 +458,6 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                         if data.get('action') == 'RETIRE':
                             dm.retire_tool(change['ID'], data.get('reason', 'Retired'), current_user['name'])
                         else:
-                            # Use calculated fallback
                             dm.update_tool_location(change['ID'], change['_bin'], change['_house'], current_user['name'])
                             last_bin = change['_bin']
                         count += 1
@@ -466,9 +465,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     st.toast(f"""
                         **✅ Update Complete**
                         
-                        We moved **{count}** tools to:
-                        
-                        `{last_bin}`
+                        We processed **{count}** items.
                         """, icon="📦")
                     st.session_state['pending_moves'] = None
                     time.sleep(1)
@@ -543,7 +540,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                             st.toast("Database is already clean.", icon="✨")
 
         # --- SECTION 4: ADD NEW (Admin Only) ---
-        if current_user['role'] == "ADMIN":
+        if current_user['role'] in ["ADMIN", "ADULT"]:
             st.markdown("---")
             st.subheader("Add New Tool")
             
@@ -567,14 +564,30 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                             st.session_state['tool_caps'] = ai_data.get('capabilities', '')
                             st.session_state['tool_stationary'] = ai_data.get('is_stationary', False)
                             
+                            # Reset warning
+                            st.session_state['dup_warning'] = None
+
+                            # DUPLICATE CHECK START
+                            from gemini_helper import check_duplicate_tool
+                            all_tools = dm.con.execute("SELECT * FROM tools").df() # Get fresh inventory
+                            dup_check = check_duplicate_tool(ai_data, all_tools)
+                            
+                            if dup_check and dup_check.get('is_duplicate'):
+                                msg = f"⚠️ **Possible Duplicate:** Similar to **{dup_check['match_name']}** (Owned by {dup_check.get('match_owner', 'Unknown')})."
+                                st.session_state['dup_warning'] = msg
+                            # DUPLICATE CHECK END
+                            
                             try: 
-                                p_options = ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"]
-                                st.session_state['tool_power'] = p_options[p_options.index(ai_data.get('power_source', 'Manual'))]
+                                p_list = ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"]
+                                raw_p = ai_data.get('power_source', 'Manual')
+                                st.session_state['tool_power'] = raw_p if raw_p in p_list else "Manual"
                             except: 
                                 st.session_state['tool_power'] = "Manual"
 
                             try:
-                                st.session_state['tool_safety'] = ["Open", "Supervised", "Adult Only"][["Open", "Supervised", "Adult Only"].index(ai_data.get('safety', 'Open'))]
+                                s_list = ["Open", "Supervised", "Adult Only"]
+                                raw_s = ai_data.get('safety', 'Open')
+                                st.session_state['tool_safety'] = raw_s if raw_s in s_list else "Open"
                             except:
                                 st.session_state['tool_safety'] = "Open"
                             
@@ -585,7 +598,13 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                             st.toast("AI Generated Details - Please Check for Accuracy.", icon="🤖")
                             st.rerun() 
                         else:
-                            st.error("AI could not generate details.")
+                            st.error("AI could not generate details from description.")
+                else:
+                    st.error("Please paste a description.")
+
+            # Display Warning if it exists
+            if st.session_state.get('dup_warning'):
+                st.warning(st.session_state['dup_warning'])
 
             with st.form("add_tool"):
                 keys = ['tool_name', 'tool_brand', 'tool_model', 'tool_caps', 'tool_bin']
