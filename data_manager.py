@@ -128,9 +128,9 @@ class DataManager:
             self._archive_tool(row['id'], user_name)
             self.con.execute("""
                 UPDATE tools 
-                SET name=?, brand=?, model_no=?, household=?, bin_location=?, capabilities=?, safety_rating=?
+                SET name=?, brand=?, model_no=?, household=?, bin_location=?, is_stationary=?, capabilities=?, safety_rating=?
                 WHERE id=?
-            """, [row['name'], row['brand'], row['model_no'], row['household'], row['bin_location'], row['capabilities'], row['safety_rating'], row['id']])
+            """, [row['name'], row['brand'], row['model_no'], row['household'], row['bin_location'], row['is_stationary'], row['capabilities'], row['safety_rating'], row['id']])
 
     def purge_old_history(self, days=30):
         # 1. Count them first
