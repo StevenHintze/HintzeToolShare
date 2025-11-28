@@ -21,7 +21,7 @@ cookie_manager = stx.CookieManager()
 st.markdown("""
     <style>
         div[data-testid="stToast"] {
-            background-color: rgba(255, 215, 0, 0.55) !important; 
+            background-color: rgba(255, 215, 0, 0.75) !important; 
             color: #000000 !important; 
             backdrop-filter: blur(25px) saturate(200%);
             -webkit-backdrop-filter: blur(25px) saturate(200%);
