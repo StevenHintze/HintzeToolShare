@@ -21,17 +21,19 @@ cookie_manager = stx.CookieManager()
 st.markdown("""
     <style>
         div[data-testid="stToast"] {
-            background-color: rgba(255, 215, 0, 0.95) !important; 
+            background-color: rgba(255, 215, 0, 0.55) !important; 
             color: #000000 !important; 
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-            border-radius: 12px;
+            backdrop-filter: blur(25px) saturate(200%);
+            -webkit-backdrop-filter: blur(25px) saturate(200%);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            box-shadow: 0 10px 30px 0 rgba(0, 0, 0, 0.15);
+            border-radius: 18px;
+            padding: 16px;
         }
         div[data-testid="stToast"] p {
             font-weight: 600;
-            font-size: 16px;
+            font-size: 15px;
+            margin-bottom: 0;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -71,7 +73,16 @@ def save_tool_callback():
              st.session_state['tool_caps'], 
              st.session_state['tool_safety']))
         
-        st.toast(f"**💾 Tool Added**\n\n**{st.session_state['tool_name']}** has been added.", icon="🛠️")
+        st.toast(
+            f"""
+            #### ✅ Tool Added
+            
+            **{st.session_state['tool_name']}** is in your Toolbox.
+            
+            *Ready for borrowing."*
+            """,
+            icon="🛠️"
+            )
         st.session_state['admin_error'] = None
         st.session_state['dup_warning'] = None
         
