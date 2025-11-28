@@ -113,11 +113,15 @@ def login():
 
 if st.session_state["user_info"] is None:
     st.title("🔐 Family Login")
-    st.text_input("Email Address", key="email_input")
-    st.text_input("Family Password", type="password", key="password_input")
-    if st.button("Log In"):
+    with st.form("login_form"):
+        st.text_input("Email Address", key="email_input")
+        st.text_input("Family Password", type="password", key="password_input")
+        
+        # Form Submit Button triggers the update automatically
+        submitted = st.form_submit_button("Log In")
+        
+    if submitted:
         login()
-    st.stop()
 
 # --- APP STARTS HERE ---
 current_user = st.session_state["user_info"]
