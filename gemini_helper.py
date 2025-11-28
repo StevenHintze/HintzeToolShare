@@ -2,43 +2,31 @@ import google.generativeai as genai
 import streamlit as st
 import json
 
-def get_ai_advice(user_query, available_tools_df):
-    """
-    Sends the user's project query + current inventory to Gemini.
-    """
+def configure_genai():
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    except Exception as e:
-        return "⚠️ Error: Gemini API Key missing or invalid."
+        return True
+    except:
+        return False
 
-    # Format Inventory
+# 1. SHOP TEACHER (Tab 3 Legacy / General Advice)
+def get_ai_advice(user_query, available_tools_df):
+    if not configure_genai(): return "⚠️ Error: API Key missing."
+    
     tool_context = ""
     for index, row in available_tools_df.iterrows():
         brand = row.get('brand', '')
         model = row.get('model_no', '')
         details = f"{brand} {model}".strip()
         stat_note = "[STATIONARY]" if row.get('is_stationary') else ""
-        
         tool_context += f"- {row['name']} [{details}] {stat_note} (Safety: {row['safety_rating']}, Caps: {row['capabilities']})\n"
 
     prompt = f"""
     You are the "Hintze Family Tool Manager." 
-    
-    YOUR GOAL:
-    Analyze the user's project and recommend the best tools.
-    
-    RULES:
-    1. ONLY recommend tools listed in the INVENTORY.
-    2. If a tool is marked [STATIONARY], warn the user they must go to the tool's location to use it.
-    3. Be practical and concise.
-    
-    INVENTORY (Currently Available):
-    {tool_context}
-    
-    USER QUESTION:
-    "{user_query}"
+    Analyze the user's project and recommend tools from the INVENTORY.
+    INVENTORY: {tool_context}
+    USER QUESTION: "{user_query}"
     """
-
     try:
         model = genai.GenerativeModel('gemini-2.5-flash') 
         response = model.generate_content(prompt)
@@ -46,97 +34,75 @@ def get_ai_advice(user_query, available_tools_df):
     except Exception as e:
         return f"⚠️ AI Error: {str(e)}"
 
-def get_smart_recommendations(user_query, available_tools_df, user_household):
+# 2. SMART PARSER (Tab 4 Auto-Fill)
+def ai_parse_tool(raw_text):
+    if not configure_genai(): return None
     try:
-        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    except Exception as e:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        prompt = f"""
+        Analyze tool description. 
+        INPUT: "{raw_text}"
+        REQUIREMENTS:
+        1. Name: Title Case (e.g. "DeWalt Impact Driver").
+        2. Brand: Manufacturer.
+        3. Model: Model number.
+        4. Power: "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic", or "Manual".
+        5. Safety: "Open", "Supervised", or "Adult Only".
+        6. Capabilities: 3-5 keywords.
+        7. Stationary: Boolean (true/false).
+        
+        OUTPUT JSON: {{ "name": "...", "brand": "...", "model_no": "...", "power_source": "...", "safety": "...", "capabilities": "...", "is_stationary": true/false }}
+        """
+        response = model.generate_content(prompt)
+        clean = response.text.replace("```json", "").replace("```", "").strip()
+        return json.loads(clean)
+    except:
         return None
 
+# 3. PROJECT PLANNER (Tab 3 Smart Cart)
+def get_smart_recommendations(user_query, available_tools_df, user_household):
+    if not configure_genai(): return None
+    
     inventory_list = []
     for index, row in available_tools_df.iterrows():
-        status_detail = "Available"
-        if row.get('status') == 'Borrowed':
-            status_detail = f"Borrowed by {row.get('borrower')}"
-
+        status = f"Borrowed by {row.get('borrower')}" if row.get('status') == 'Borrowed' else "Available"
         inventory_list.append({
-            "id": row.get('id', 'Unknown'),
-            "name": row.get('name', 'Unknown'),
-            "brand": row.get('brand', ''),
-            "household": row.get('household', 'Unknown'),
-            "status": status_detail,
-            "is_stationary": row.get('is_stationary', False),
-            "specs": row.get('capabilities', ''),
-            "safety": row.get('safety_rating', 'Open')
+            "id": row.get('id'), "name": row.get('name'), "brand": row.get('brand'),
+            "household": row.get('household'), "status": status, "safety": row.get('safety_rating'),
+            "is_stationary": row.get('is_stationary')
         })
     
-    inventory_json = json.dumps(inventory_list)
-
     prompt = f"""
-    You are the Hintze Family Tool Manager.
-    USER PROJECT: "{user_query}"
-    USER'S HOUSEHOLD: "{user_household}"
-    
-    YOUR TASK:
-    Identify the best tools for the job and categorize them.
-    
-    CATEGORIES:
-    1. "locate": Tools the user OWNS (same household).
-    2. "track_down": Tools the user OWNS but are currently BORROWED.
-    3. "borrow": Tools the user DOES NOT OWN.
-    4. "missing": Essential tools NOT in inventory.
-    
-    INVENTORY JSON:
-    {inventory_json}
-    
-    OUTPUT FORMAT (JSON ONLY):
-    {{
-        "rationale": "Brief strategy explanation.",
-        "locate_list": [ {{"tool_name": "...", "location": "Bin/Shelf..."}} ],
-        "track_down_list": [ {{"tool_name": "...", "held_by": "Name"}} ],
-        "borrow_list": [
-            {{
-                "tool_id": "ID",
-                "name": "...",
-                "household": "...",
-                "reason": "..."
-            }}
-        ],
-        "missing_list": [
-            {{
-                "tool_name": "Name",
-                "importance": "Critical/Optional",
-                "advice": "..."
-            }}
-        ]
-    }}
+    You are the Tool Manager.
+    PROJECT: "{user_query}" (User Loc: {user_household})
+    INVENTORY: {json.dumps(inventory_list)}
+    TASK: Categorize tools into:
+    1. "locate" (User owns, available)
+    2. "track_down" (User owns, borrowed)
+    3. "borrow" (User needs from others)
+    4. "missing" (Not in inventory)
+    OUTPUT JSON: {{ "locate_list": [], "track_down_list": [], "borrow_list": [], "missing_list": [] }}
     """
-
     try:
         model = genai.GenerativeModel('gemini-2.5-flash') 
         response = model.generate_content(prompt)
-        clean_text = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(clean_text)
-    except Exception as e:
+        clean = response.text.replace("```json", "").replace("```", "").strip()
+        return json.loads(clean)
+    except:
         return None
 
+# 4. INVENTORY FILTER (Tab 1 Search)
 def ai_filter_inventory(user_query, inventory_df):
-    try:
-        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    except:
-        return []
-
+    if not configure_genai(): return []
     context = ""
     for index, row in inventory_df.iterrows():
         context += f"ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']} | Cap: {row['capabilities']}\n"
-
-    prompt = f"""
-    You are an Inventory Search Engine.
-    QUERY: "{user_query}"
-    INVENTORY:
-    {context}
-    TASK: Return a JSON list of Tool IDs {{ "match_ids": [...] }} that match the query.
-    """
     
+    prompt = f"""
+    Search Engine. Query: "{user_query}"
+    Inventory: {context}
+    Return JSON list of matching IDs: {{ "match_ids": ["ID1", "ID2"] }}
+    """
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)
@@ -145,130 +111,47 @@ def ai_filter_inventory(user_query, inventory_df):
     except:
         return []
 
-def ai_parse_tool(raw_text):
-    """
-    Takes raw text (e.g. Amazon title) and returns a JSON dictionary.
-    """
-    try:
-        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        
-        # UPDATED: Explicit instruction for Title Case
-        prompt = f"""
-        You are an inventory assistant. Analyze this tool description.
-        INPUT TEXT: "{raw_text}"
-        REQUIREMENTS:
-        1. Name: Clean, concise tool name. Use Title Case (e.g. "DeWalt Impact Driver"). Do NOT use ALL CAPS or all lowercase.
-        2. Brand: The manufacturer.
-        3. Model: The specific model number.
-        4. Power: "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic", or "Manual".
-        5. Safety: "Open", "Supervised", or "Adult Only".
-        6. Capabilities: A clean string of 3-5 comma-separated keywords.
-        7. Stationary: Boolean (true/false). True if the tool is very large/heavy/mounted.
-        
-        OUTPUT FORMAT:
-        Return ONLY valid JSON.
-        {{
-            "name": "...",
-            "brand": "...",
-            "model_no": "...",
-            "power_source": "...",
-            "safety": "...",
-            "capabilities": "...",
-            "is_stationary": true/false
-        }}
-        """
-        response = model.generate_content(prompt)
-        clean_text = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(clean_text)
-    except Exception as e:
-        return None
-
+# 5. SMART MOVER (Tab 4 Quick Actions)
 def parse_location_update(user_query, user_tools_df):
-    """
-    Analyzes user query to Move OR Retire tools.
+    if not configure_genai(): return None
+    tool_list_str = ""
+    for index, row in user_tools_df.iterrows():
+        tool_list_str += f"- ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']}\n"
+        
+    prompt = f"""
+    Inventory Manager.
+    REQUEST: "{user_query}"
+    TOOLS: {tool_list_str}
+    TASK: Identify action (MOVE or RETIRE) for specific IDs.
+    OUTPUT JSON: {{ "updates": [ {{ "tool_id": "...", "action": "MOVE/RETIRE", "new_bin": "...", "reason": "..." }} ] }}
     """
     try:
-        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         model = genai.GenerativeModel('gemini-2.5-flash')
-        
-        tool_list_str = ""
-        for index, row in user_tools_df.iterrows():
-            tool_list_str += f"- ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']}\n"
-        
-        prompt = f"""
-        You are an Inventory Manager.
-        
-        USER REQUEST: "{user_query}"
-        USER'S INVENTORY:
-        {tool_list_str}
-        
-        YOUR TASK:
-        1. Match tools from the inventory list to the user request.
-        2. Determine the ACTION: 'MOVE' or 'RETIRE' (Sold/Broken/Donated/Deleted).
-        
-        OUTPUT JSON:
-        {{
-            "updates": [
-                {{ 
-                    "tool_id": "EXACT_ID", 
-                    "action": "MOVE" or "RETIRE",
-                    "new_bin": "Location string (if MOVE)", 
-                    "new_household": "Household string (if MOVE)",
-                    "reason": "Sold/Broken/etc (if RETIRE)"
-                }}
-            ]
-        }}
-        """
         response = model.generate_content(prompt)
-        clean_text = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(clean_text)
+        clean = response.text.replace("```json", "").replace("```", "").strip()
+        return json.loads(clean)
     except:
         return None
 
+# 6. DUPLICATE CHECKER (Tab 4 Safety)
 def check_duplicate_tool(new_tool_data, inventory_df):
-    """
-    Compares a potential new tool against the existing database to find duplicates.
+    if not configure_genai(): return None
+    existing_list = []
+    for index, row in inventory_df.iterrows():
+        existing_list.append(f"Name: {row['name']} | Brand: {row['brand']} | Model: {row['model_no']} | Owner: {row['owner']}")
+    
+    new_str = f"{new_tool_data.get('name')} {new_tool_data.get('brand')} {new_tool_data.get('model_no')}"
+    
+    prompt = f"""
+    Check for duplicates.
+    NEW: {new_str}
+    EXISTING: {json.dumps(existing_list)}
+    OUTPUT JSON: {{ "is_duplicate": true/false, "match_name": "...", "match_owner": "..." }}
     """
     try:
-        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         model = genai.GenerativeModel('gemini-2.5-flash')
-        
-        # UPDATED CONTEXT: Now includes Owner and Household so AI doesn't guess
-        existing_list = []
-        for index, row in inventory_df.iterrows():
-            existing_list.append(f"ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']} | Model: {row['model_no']} | Owner: {row['owner']} | House: {row['household']}")
-        
-        existing_str = "\n".join(existing_list)
-        
-        new_tool_str = f"{new_tool_data.get('name')} | {new_tool_data.get('brand')} | {new_tool_data.get('model_no')}"
-        
-        prompt = f"""
-        You are a Data Integrity Agent. Check for duplicates.
-        
-        NEW TOOL CANDIDATE:
-        {new_tool_str}
-        
-        EXISTING HOUSEHOLD INVENTORY:
-        {existing_str}
-        
-        YOUR TASK:
-        Does the NEW TOOL look like a duplicate of any item in the EXISTING INVENTORY?
-        - Strict Check: Matching Model Number is a definite duplicate.
-        - Fuzzy Check: Matching Name + Brand is a likely duplicate.
-        
-        OUTPUT JSON:
-        {{
-            "is_duplicate": true/false,
-            "match_name": "Name of the existing tool found",
-            "match_owner": "Owner name from the list above",
-            "match_household": "Household name from the list above",
-            "reason": "Why you think it's a match"
-        }}
-        """
-        
         response = model.generate_content(prompt)
-        clean_text = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(clean_text)
+        clean = response.text.replace("```json", "").replace("```", "").strip()
+        return json.loads(clean)
     except:
         return None
