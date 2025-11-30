@@ -87,9 +87,7 @@ def save_tool_callback():
         st.toast(
             f"""
             #### Tool Added<br>
-            
             **{st.session_state['tool_name']}** is in your Toolbox.<br>
-            
             *Ready for borrowing."*
             """,
             icon="✅"
