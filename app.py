@@ -86,13 +86,13 @@ def save_tool_callback():
         
         st.toast(
             f"""
-            #### ✅ Tool Added
+            #### Tool Added<br>
             
-            **{st.session_state['tool_name']}** is in your Toolbox.
+            **{st.session_state['tool_name']}** is in your Toolbox.<br>
             
             *Ready for borrowing."*
             """,
-            icon="🛠️"
+            icon="✅"
             )
         st.session_state['admin_error'] = None
         st.session_state['dup_warning'] = None
@@ -521,7 +521,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                         st.session_state['tool_owner'] = quick_owner
                         st.session_state['tool_household'] = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0])
                     
-                    st.toast("AI Generated Details - Please Check for Accuracy.", icon="🕵️")
+                    st.toast("AI Generated Details! Please Check for Accuracy.", icon="🕵️")
                     time.sleep(2.5)
                     st.rerun()
 
