@@ -17,23 +17,34 @@ dm.seed_data([], [])
 # --- COOKIE MANAGER ---
 cookie_manager = stx.CookieManager()
 
-# --- CUSTOM CSS ---
 st.markdown("""
     <style>
         div[data-testid="stToast"] {
-            background-color: rgba(255, 215, 0, 0.75) !important; 
+            background-color: rgba(255, 215, 0, 0.95) !important; 
             color: #000000 !important; 
-            backdrop-filter: blur(25px) saturate(200%);
-            -webkit-backdrop-filter: blur(25px) saturate(200%);
-            border: 1px solid rgba(255, 255, 255, 0.4);
-            box-shadow: 0 10px 30px 0 rgba(0, 0, 0, 0.15);
-            border-radius: 18px;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+            
+            /* Layout Fixes */
+            display: flex;
+            flex-direction: row;
+            align-items: flex-start;
+            text-align: left;
+            gap: 12px;
             padding: 16px;
         }
         div[data-testid="stToast"] p {
             font-weight: 600;
             font-size: 15px;
-            margin-bottom: 0;
+            margin: 0; /* Remove default margins */
+            line-height: 1.4;
+        }
+        /* Optional: Make the icon bigger */
+        div[data-testid="stToast"] > div:first-child {
+            font-size: 24px;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -510,7 +521,8 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                         st.session_state['tool_owner'] = quick_owner
                         st.session_state['tool_household'] = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0])
                     
-                    st.toast("AI Generated Details - Please Check for Accuracy.", icon="🤖")
+                    st.toast("AI Generated Details - Please Check for Accuracy.", icon="🕵️")
+                    time.sleep(2.5)
                     st.rerun()
 
         if st.session_state.get('dup_warning'):
