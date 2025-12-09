@@ -173,6 +173,11 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
         if 'lend_stage' not in st.session_state: st.session_state['lend_stage'] = 'manual'
         if 'lend_data' not in st.session_state: st.session_state['lend_data'] = None
 
+        # Reset state if switching to Manual
+        if method == "📝 Manual Selection" and st.session_state.get('lend_stage') != 'manual':
+             st.session_state['lend_stage'] = 'manual'
+             st.session_state['lend_data'] = None
+
         if method == "🤖 AI Assistant":
             with st.container(border=True):
                 st.caption("Describe what happened naturally (e.g., 'I lent the drill to Shawn').")
@@ -218,7 +223,8 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     st.rerun()
 
         # --- FORM LOGIC ---
-        if st.session_state.get('lend_stage') == 'verify' or st.session_state.get('lend_stage') is None: 
+        # Allow 'manual' stage or 'verify' stage (from AI)
+        if st.session_state.get('lend_stage') in ['verify', 'manual'] or st.session_state.get('lend_stage') is None: 
             st.markdown("---")
             st.subheader("Confirm Details")
 
