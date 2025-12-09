@@ -1,0 +1,20 @@
+# Secrets & Configuration
+.streamlit/secrets.toml
+.env
+
+# Data & Registries (Personal Info)
+family_registry.json
+tools_registry.json
+inventory.db
+*.db
+*.sqlite
+
+# Python / Environment
+__pycache__/
+.venv/
+*.pyc
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store

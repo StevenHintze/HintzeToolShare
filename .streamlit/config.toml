@@ -1,0 +1,6 @@
+[theme]
+primaryColor="#FFD700"  # Adjusted Gold/Yellow (Forces Black text on buttons)
+backgroundColor="#0E1117" # Dark Industrial Background
+secondaryBackgroundColor="#262730" # Dark Grey for sidebars/inputs
+textColor="#FAFAFA" # White text
+font="sans serif"
