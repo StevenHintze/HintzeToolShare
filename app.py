@@ -17,7 +17,14 @@ dm.seed_data([], [])
 # --- COOKIE MANAGER ---
 cookie_manager = stx.CookieManager()
 
-st.markdown("", unsafe_allow_html=True)
+st.markdown("""
+    <style>
+    /* Fix Multiselect Tag Text Color (White on Yellow -> Black on Yellow) */
+    span[data-baseweb="tag"] {
+        color: #000000 !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # --- DYNAMIC DATA ---
 try:
