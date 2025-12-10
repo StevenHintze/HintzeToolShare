@@ -8,7 +8,7 @@ import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.40", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.41", page_icon="🛠️")
 
 # Initialize DB (Fail-Safe + Cached)
 dm = DataManager()
@@ -59,8 +59,7 @@ st.markdown("""
 
 # --- DYNAMIC DATA ---
 try:
-    # CACHED CALL
-    family_df = dm.get_family_members() 
+    family_df = dm.get_family_members() # Cached
     OWNER_HOMES = dict(zip(family_df['name'], family_df['household']))
     ALL_OWNERS = list(OWNER_HOMES.keys())
     ALL_HOUSEHOLDS = list(set(OWNER_HOMES.values()))
@@ -105,7 +104,6 @@ def save_tool_callback():
         st.session_state['admin_error'] = None
         st.session_state['dup_warning'] = None
         
-        # Clear form but KEEP defaults
         st.session_state['tool_name'] = ""
         st.session_state['tool_brand'] = ""
         st.session_state['tool_model'] = ""
@@ -393,138 +391,197 @@ with current_tabs[2]:
         elif not recs.get('missing_list'):
             st.info("Looks like you have everything you need at home! Good luck.")
 
-# TAB 4: Lending Center
+# TAB 4: Lending & Borrowing Center (RESTORED DUAL MODE)
 if current_user['role'] in ["ADMIN", "ADULT"]:
     with current_tabs[3]:
-        st.header("🤝 Lending Center")
-        st.caption(f"Lend tools from **{current_user['name']}'s Toolbox** to others.")
+        st.header("🤝 Lending & Borrowing Center")
         
-        my_available_tools = dm.get_my_tools(current_user['name']) # Cached
-        my_available_tools = my_available_tools[my_available_tools['status'] == 'Available']
-
-        method = st.radio("Input Method:", ["🤖 AI Assistant", "📝 Manual Selection"], horizontal=True)
-        
-        if 'lend_stage' not in st.session_state: st.session_state['lend_stage'] = 'manual'
-        if 'lend_data' not in st.session_state: st.session_state['lend_data'] = None
-
-        if method == "📝 Manual Selection" and st.session_state.get('lend_stage') != 'manual':
-             st.session_state['lend_stage'] = 'manual'
-             st.session_state['lend_data'] = None
-
-        if method == "🤖 AI Assistant":
-            with st.container(border=True):
-                st.caption("Describe what happened naturally (e.g., 'I lent the drill to Shawn').")
-                with st.form("ai_lending_form"):
-                    lending_query = st.text_input("Tell me what's happening:", placeholder="Type here and press Enter...")
-                    submitted = st.form_submit_button("Analyze Request", width='stretch')
-                
-                if submitted and lending_query:
-                    with st.spinner("Processing..."):
-                        fam_list = dm.get_family_members().to_dict('records')
-                        all_my_tools = dm.get_my_tools(current_user['name'])
-                        result = parse_lending_request(lending_query, all_my_tools, fam_list)
-                        
-                        if result:
-                            if result.get('candidates'):
-                                st.session_state['lend_stage'] = 'refine'
-                                st.session_state['lend_data'] = result
-                            else:
-                                st.warning("I couldn't find any tools matching your description. Please select manually.")
-                                st.session_state['lend_stage'] = 'verify'
-                                st.session_state['lend_data'] = result
+        # --- SECTION 1: BORROW TOOLS (SELF) ---
+        with st.expander("⬇️ Borrow Tools (For You)", expanded=True):
+            st.caption("Quickly borrow tools for yourself from others.")
+            # Cached query
+            all_tools_borrow = dm.get_all_tools()
+            # Filter: Available, Not Stationary, AND Not In My Household
+            available_only = all_tools_borrow[
+                (all_tools_borrow['status'] == 'Available') & 
+                (all_tools_borrow['is_stationary'] != True) &
+                (all_tools_borrow['household'] != current_user['household'])
+            ]
+            
+            if not available_only.empty:
+                with st.form("manual_borrow_multi"):
+                    t_options = available_only['name'].tolist()
+                    st.info(f"There are {len(t_options)} tools available to borrow.")
+                    
+                    selected_tools = st.multiselect("Select Tools to Borrow:", t_options)
+                    days_needed = st.number_input("Days Needed", min_value=1, value=7, key="borrow_days")
+                    
+                    if st.form_submit_button("Confirm Borrow Request", width='stretch'):
+                        if selected_tools:
+                            success_count = 0
+                            for t_name in selected_tools:
+                                tool_row = available_only[available_only['name'] == t_name].iloc[0]
+                                if check_safety(current_user['role'], tool_row['safety_rating']):
+                                    dm.borrow_tool(tool_row['id'], current_user['name'], days_needed)
+                                    success_count += 1
+                                else:
+                                    st.error(f"🚫 Safety Restriction on {t_name}")
+                            
+                            if success_count > 0:
+                                dm.clear_cache()
+                                st.toast(f"✅ Successfully borrowed {success_count} tools!", icon="🚚")
+                                time.sleep(1.5)
+                                st.rerun()
                         else:
-                            st.error("Could not understand request.")
+                            st.warning("Please select at least one tool.")
+            else:
+                st.info("No transportable tools available from other households.")
 
-        if st.session_state.get('lend_stage') == 'refine' and st.session_state.get('lend_data'):
-            st.divider()
-            st.info("🔎 I found multiple options. Select the ones you mean:")
-            with st.form("refine_candidates"):
-                cands = st.session_state['lend_data'].get('candidates', [])
-                selected_cands_ids = []
-                for c in cands:
-                    is_checked = st.checkbox(f"**{c['name']}**", value=True, key=f"cand_{c['id']}")
-                    if is_checked:
-                        selected_cands_ids.append(c['id'])
-                
-                if st.form_submit_button("Confirm Selection"):
-                    st.session_state['lend_data']['tool_ids'] = selected_cands_ids
-                    st.session_state['lend_stage'] = 'verify'
-                    st.rerun()
+        st.markdown("---")
 
-        if st.session_state.get('lend_stage') in ['verify', 'manual'] or st.session_state.get('lend_stage') is None: 
-            st.markdown("---")
-            st.subheader("Confirm Details")
-
-            default_tools = []
-            default_borrower = None
-            force_safety = False
+        # --- SECTION 2: LEND TOOLS (OTHERS) ---
+        with st.expander("⬆️ Lend Tools (To Others)", expanded=True):
+            st.caption(f"Lend tools to other family members.")
             
-            if st.session_state.get('lend_data'):
-                data = st.session_state['lend_data']
-                member_names = family_df['name'].tolist()
-                if data.get('borrower_name') in member_names:
-                    default_borrower = data['borrower_name']
-                
-                if data.get('tool_ids'):
-                    t_ids = data['tool_ids']
-                    pre_selected = my_available_tools[my_available_tools['id'].isin(t_ids)]['name'].tolist()
-                    default_tools = pre_selected
-                
-                if data.get('force_override'): force_safety = True
-                
-                if st.session_state['lend_stage'] == 'verify':
-                    st.info("👇 Please verify the details below.")
-
-            if my_available_tools.empty:
-                 chk = dm.get_my_tools(current_user['name'])
-                 if chk.empty:
-                     st.warning("⚠️ You don't have any tools in your toolbox yet.")
-                 else:
-                     st.warning(f"⚠️ You have {len(chk)} tools, but they are ALL currently borrowed or unavailable.")
+            admin_override = False
+            if current_user['role'] == "ADMIN":
+                admin_override = st.toggle("🛡️ Admin Mode: Lend Any Tool", value=False)
             
-            with st.form("lending_form"):
-                selected_tool_names = st.multiselect("Select Tools", my_available_tools['name'], default=default_tools)
-                borrower = st.selectbox("Lending To:", family_df['name'], index=family_df['name'].tolist().index(default_borrower) if default_borrower else None)
-                days = st.number_input("Duration (Days)", min_value=1, value=7)
-                
-                safety_warning = []
-                requires_override = False
-                
-                if selected_tool_names and borrower:
-                    b_role = family_df[family_df['name'] == borrower].iloc[0]['role']
-                    for t_name in selected_tool_names:
-                        t_row = my_available_tools[my_available_tools['name'] == t_name].iloc[0]
-                        if b_role == "CHILD" and t_row['safety_rating'] == "Adult Only":
-                            safety_warning.append(f"⛔ **{t_name}** is 'Adult Only' and **{borrower}** is a Child.")
-                            requires_override = True
-                
-                if requires_override:
-                    st.error("⚠️ SAFETY ALERT")
-                    for w in safety_warning: st.write(w)
-                    authorized = st.checkbox("☑️ I authorize this loan and assume full responsibility for safety.", value=force_safety)
-                else:
-                    authorized = True
+            if admin_override:
+                lending_pool = dm.get_all_tools()
+                lending_pool = lending_pool[lending_pool['status'] == 'Available']
+                st.caption("Showing ALL available tools in registry.")
+            else:
+                lending_pool = dm.get_my_tools(current_user['name'])
+                lending_pool = lending_pool[lending_pool['status'] == 'Available']
+                st.caption(f"Showing tools owned by {current_user['name']}.")
 
-                if st.form_submit_button("Confirm Loan 🤝"):
-                    if not selected_tool_names:
-                        st.error("Select at least one tool.")
-                    elif not borrower:
-                        st.error("Select a borrower.")
-                    elif requires_override and not authorized:
-                        st.error("You must authorize the safety override to proceed.")
-                    else:
-                        success_count = 0
-                        for t_name in selected_tool_names:
-                            tid = my_available_tools[my_available_tools['name'] == t_name].iloc[0]['id']
-                            dm.borrow_tool(tid, borrower, days)
-                            success_count += 1
-                        
-                        dm.clear_cache()
-                        st.toast(f"Successfully lent {success_count} tools to {borrower}!", icon="✅")
-                        st.session_state['lend_stage'] = 'manual'
-                        st.session_state['lend_data'] = None
-                        time.sleep(1.5)
+            method = st.radio("Input Method:", ["🤖 AI Assistant", "📝 Manual Selection"], horizontal=True)
+            
+            if 'lend_stage' not in st.session_state: st.session_state['lend_stage'] = 'manual'
+            if 'lend_data' not in st.session_state: st.session_state['lend_data'] = None
+
+            if method == "📝 Manual Selection" and st.session_state.get('lend_stage') != 'manual':
+                 st.session_state['lend_stage'] = 'manual'
+                 st.session_state['lend_data'] = None
+
+            if method == "🤖 AI Assistant":
+                with st.container(border=True):
+                    st.caption("Describe what happened naturally (e.g., 'I lent the drill to Shawn').")
+                    with st.form("ai_lending_form"):
+                        lending_query = st.text_input("Tell me what's happening:", placeholder="Type here and press Enter...")
+                        submitted = st.form_submit_button("Analyze Request", width='stretch')
+                    
+                    if submitted and lending_query:
+                        with st.spinner("Processing..."):
+                            fam_list = dm.get_family_members().to_dict('records')
+                            result = parse_lending_request(lending_query, lending_pool, fam_list)
+                            
+                            if result:
+                                if result.get('candidates'):
+                                    st.session_state['lend_stage'] = 'refine'
+                                    st.session_state['lend_data'] = result
+                                else:
+                                    st.warning("I couldn't find any tools matching your description. Please select manually.")
+                                    st.session_state['lend_stage'] = 'verify'
+                                    st.session_state['lend_data'] = result
+                            else:
+                                st.error("Could not understand request.")
+
+            if st.session_state.get('lend_stage') == 'refine' and st.session_state.get('lend_data'):
+                st.divider()
+                st.info("🔎 I found multiple options. Select the ones you mean:")
+                with st.form("refine_candidates"):
+                    cands = st.session_state['lend_data'].get('candidates', [])
+                    selected_cands_ids = []
+                    for c in cands:
+                        is_checked = st.checkbox(f"**{c['name']}**", value=True, key=f"cand_{c['id']}")
+                        if is_checked:
+                            selected_cands_ids.append(c['id'])
+                    
+                    if st.form_submit_button("Confirm Selection"):
+                        st.session_state['lend_data']['tool_ids'] = selected_cands_ids
+                        st.session_state['lend_stage'] = 'verify'
                         st.rerun()
+
+            if st.session_state.get('lend_stage') in ['verify', 'manual'] or st.session_state.get('lend_stage') is None: 
+                st.markdown("---")
+                st.subheader("Confirm Details")
+
+                default_tools = []
+                default_borrower = None
+                force_safety = False
+                
+                if st.session_state.get('lend_data'):
+                    data = st.session_state['lend_data']
+                    member_names = family_df['name'].tolist()
+                    if data.get('borrower_name') in member_names:
+                        default_borrower = data['borrower_name']
+                    
+                    if data.get('tool_ids'):
+                        t_ids = data['tool_ids']
+                        # Filter pre-selected
+                        pre_selected = lending_pool[lending_pool['id'].isin(t_ids)]['name'].tolist()
+                        default_tools = pre_selected
+                    
+                    if data.get('force_override'): force_safety = True
+                    
+                    if st.session_state['lend_stage'] == 'verify':
+                        st.info("👇 Please verify the details below.")
+
+                if lending_pool.empty:
+                     if admin_override:
+                         st.warning("⚠️ No tools available in the entire registry.")
+                     else:
+                         chk = dm.get_my_tools(current_user['name'])
+                         if chk.empty:
+                             st.warning("⚠️ You don't have any tools in your toolbox yet.")
+                         else:
+                             st.warning(f"⚠️ You have {len(chk)} tools, but they are ALL currently borrowed or unavailable.")
+                
+                with st.form("lending_form"):
+                    selected_tool_names = st.multiselect("Select Tools", lending_pool['name'], default=default_tools)
+                    borrower = st.selectbox("Lending To:", family_df['name'], index=family_df['name'].tolist().index(default_borrower) if default_borrower else None)
+                    days = st.number_input("Duration (Days)", min_value=1, value=7)
+                    
+                    safety_warning = []
+                    requires_override = False
+                    
+                    if selected_tool_names and borrower:
+                        b_role = family_df[family_df['name'] == borrower].iloc[0]['role']
+                        for t_name in selected_tool_names:
+                            t_row = lending_pool[lending_pool['name'] == t_name].iloc[0]
+                            if b_role == "CHILD" and t_row['safety_rating'] == "Adult Only":
+                                safety_warning.append(f"⛔ **{t_name}** is 'Adult Only' and **{borrower}** is a Child.")
+                                requires_override = True
+                    
+                    if requires_override:
+                        st.error("⚠️ SAFETY ALERT")
+                        for w in safety_warning: st.write(w)
+                        authorized = st.checkbox("☑️ I authorize this loan and assume full responsibility for safety.", value=force_safety)
+                    else:
+                        authorized = True
+
+                    if st.form_submit_button("Confirm Loan 🤝"):
+                        if not selected_tool_names:
+                            st.error("Select at least one tool.")
+                        elif not borrower:
+                            st.error("Select a borrower.")
+                        elif requires_override and not authorized:
+                            st.error("You must authorize the safety override to proceed.")
+                        else:
+                            success_count = 0
+                            for t_name in selected_tool_names:
+                                tid = lending_pool[lending_pool['name'] == t_name].iloc[0]['id']
+                                dm.borrow_tool(tid, borrower, days)
+                                success_count += 1
+                            
+                            dm.clear_cache()
+                            st.toast(f"Successfully lent {success_count} tools to {borrower}!", icon="✅")
+                            st.session_state['lend_stage'] = 'manual'
+                            st.session_state['lend_data'] = None
+                            time.sleep(1.5)
+                            st.rerun()
 
 # TAB 5: Manage Toolbox
 if current_user['role'] in ["ADMIN", "ADULT"]:
@@ -676,7 +733,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     st.session_state['tool_household'] = OWNER_HOMES.get(final_owner, current_user['household'])
                     
                     st.toast("AI Generated Details - Please Check for Accuracy.", icon="🤖")
-                    time.sleep(2.5) # Allow toast to be seen
+                    time.sleep(2.5) 
                     st.rerun()
 
         if st.session_state.get('dup_warning'):
