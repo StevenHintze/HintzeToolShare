@@ -133,19 +133,19 @@ if secret_input == st.secrets["REGISTRY_KEY"]:
     with col1:
         st.subheader("Family Only")
         st.caption("Updates names, emails, and roles.")
-        if st.button("Update Family 👥", width='Stretch'):
+        if st.button("Update Family 👥", width='stretch'):
             update_family()
             
     with col2:
         st.subheader("Tools Only")
         st.caption("Overwrites tool list (Resets borrow status).")
-        if st.button("Update Tools 🛠️", width='Stretch'):
+        if st.button("Update Tools 🛠️", width='stretch'):
             update_tools()
             
     with col3:
         st.subheader("Nuclear Option")
         st.caption("Wipes and re-uploads everything.")
-        if st.button("Update EVERYTHING 🚀", type="primary", width='Stretch'):
+        if st.button("Update EVERYTHING 🚀", type="primary", width='stretch'):
             f = update_family()
             t = update_tools()
             if f and t:
