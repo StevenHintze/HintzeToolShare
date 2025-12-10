@@ -631,7 +631,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 quick_owner = st.selectbox("Who Owns It?", ALL_OWNERS, index=default_owner_idx, key="ai_owner_select")
             with c2: 
                 raw_input = st.text_input("Paste Description", key="ai_input")
-            trigger_ai = st.form_submit_button("✨ Auto-Fill", use_container_width=True)
+            trigger_ai = st.form_submit_button("✨ Click for AI to Generate Details Below", use_container_width=True)
 
         if trigger_ai and raw_input:
             with st.spinner("Analyzing..."):
