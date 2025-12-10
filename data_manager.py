@@ -4,45 +4,34 @@ import pandas as pd
 import uuid
 import json
 import datetime
-import requests
+import requests 
 
 class DataManager:
     def __init__(self):
-        # 1. DIAGNOSTIC: Check if Secret exists
-        if "MOTHERDUCK_TOKEN" not in st.secrets:
-            st.error("🚨 Critical Error: 'MOTHERDUCK_TOKEN' is missing from Streamlit Secrets.")
-            st.stop()
-            
-        token = st.secrets["MOTHERDUCK_TOKEN"]
+        # 1. Setup Connection String (Try Cloud first)
+        token = None
+        try:
+            token = st.secrets.get("MOTHERDUCK_TOKEN")
+        except FileNotFoundError:
+            pass 
         
-        # 2. VALIDATION: Check for common copy-paste errors
-        if not token or token.strip() == "":
-            st.error("🚨 Critical Error: MotherDuck Token is empty.")
-            st.stop()
-            
-        self.con_str = f'md:?motherduck_token={token}'
+        if token:
+            self.con_str = f'md:?motherduck_token={token}'
+        else:
+            self.con_str = 'inventory.db' 
         
-        # 3. CONNECTION: strict cloud connection
+        # 2. Attempt Connection with Auto-Fallback
         try:
             self.con = duckdb.connect(self.con_str)
-            # Verify connection is alive
+            # Test query to ensure connection is actually alive
             self.con.execute("SELECT 1")
         except Exception as e:
-            st.error(f"""
-            **❌ Database Connection Failed**
-            
-            We could not connect to the Cloud Database.
-            
-            **Technical Error:** `{str(e)}`
-            
-            **Troubleshooting:**
-            1. Go to Streamlit Cloud -> App -> Settings -> Secrets.
-            2. Verify `MOTHERDUCK_TOKEN` is correct.
-            3. Ensure there are no extra quotes inside the string.
-            """)
-            st.stop()
+            print(f"❌ MotherDuck Connection Failed: {e}")
+            print("⚠️ Switching to Local Database (inventory.db)")
+            self.con_str = 'inventory.db'
+            self.con = duckdb.connect(self.con_str)
 
-        # 4. INITIALIZE
+        # 3. Initialize Database
         self.con.execute("CREATE DATABASE IF NOT EXISTS hintze_inventory")
         self.con.execute("USE hintze_inventory")
         self._init_schema()
