@@ -60,6 +60,7 @@ def ai_parse_tool(raw_text):
     except:
         return None
 
+
 # 3. PROJECT PLANNER (Tab 3 Smart Cart)
 def get_smart_recommendations(user_query, available_tools_df, user_household, user_name):
     if not configure_genai(): return None
@@ -68,20 +69,14 @@ def get_smart_recommendations(user_query, available_tools_df, user_household, us
     for index, row in available_tools_df.iterrows():
         status = f"Borrowed by {row.get('borrower')}" if row.get('status') == 'Borrowed' else "Available"
         
-        # Helper to safely get native types (int64 -> int, bool_ -> bool)
         def safe_get(key):
             val = row.get(key)
-            if hasattr(val, 'item'): return val.item() # Numpy types
+            if hasattr(val, 'item'): return val.item()
             return val
 
         inventory_list.append({
-            "id": safe_get('id'), 
-            "name": safe_get('name'), 
-            "brand": safe_get('brand'),
-            "household": safe_get('household'), 
-            "status": status, 
-            "borrower": safe_get('borrower'),
-            "safety": safe_get('safety_rating'),
+            "id": safe_get('id'), "name": safe_get('name'), "brand": safe_get('brand'),
+            "household": safe_get('household'), "status": status, 
             "is_stationary": safe_get('is_stationary')
         })
     
@@ -92,24 +87,24 @@ def get_smart_recommendations(user_query, available_tools_df, user_household, us
     INVENTORY: {json.dumps(inventory_list)}
     
     TASK: Categorize tools into:
-    1. "locate" (Tools the User ALREADY HAS. This includes tools owned by User OR tools currently "Borrowed by {user_name}")
-    2. "track_down" (Tools owned by User but currently borrowed by someone else)
-    3. "borrow" (Tools the user needs but doesn't have)
+    1. "locate" (User ALREADY HAS. Includes tools owned by User OR borrowed by User)
+    2. "track_down" (User owns but currently borrowed by someone else)
+    3. "borrow" (User needs from others)
     4. "missing" (Not in inventory at all)
 
     CRITICAL RULES:
-    1. **CHECK POSSESSION FIRST**: If the user owns a tool OR has already borrowed it (borrower="{user_name}"), put it in "locate".
-    2. **avoid DUPLICATES**: If the user has a tool in "locate" (e.g. they own a Ladder), DO NOT suggest borrowing another one unless the project explicitly needs multiple (e.g. "We need 2 ladders").
-    3. **PREFER OWNED**: If the user owns a tool but it's borrowed by someone else, put it in "track_down". Do not suggest "borrow" for it unless urgent.
+    1. CHECK POSSESSION FIRST: If the user owns a tool OR has already borrowed it, put it in "locate".
+    2. PREFER OWNED: If the user owns a tool but it's borrowed by someone else, put it in "track_down".
     """
     
+    # UPDATED JSON STRUCTURE TO INCLUDE "reason"
     json_structure = """
     OUTPUT JSON structure:
     {
         "locate_list": [{"tool_name": "Exact Name", "location": "Bin/Shelf"}],
         "track_down_list": [{"tool_name": "Exact Name", "held_by": "Borrower Name"}],
         "borrow_list": [{"name": "Tool Name", "household": "Owner House", "tool_id": "ID", "reason": "Why needed"}],
-        "missing_list": [{"tool_name": "Tool Name", "importance": "High/Med/Low", "advice": "Buy/Rent", "reason": "Explanation of why this tool is needed"}]
+        "missing_list": [{"tool_name": "Tool Name", "importance": "High/Med/Low", "advice": "Buy/Rent", "reason": "Explanation of why this tool is needed for this specific project"}]
     }
     """
     
@@ -117,25 +112,15 @@ def get_smart_recommendations(user_query, available_tools_df, user_household, us
     try:
         model = genai.GenerativeModel('gemini-2.5-flash') 
         response = model.generate_content(prompt)
-        
-        # Try to find JSON object structure
         text = response.text
         start = text.find('{')
         end = text.rfind('}') + 1
-        
         if start != -1 and end != -1:
-            clean = text[start:end]
-            return json.loads(clean)
+            return json.loads(text[start:end])
         else:
-            # Fallback to simple ref cleaning
             clean = text.replace("```json", "").replace("```", "").strip()
             return json.loads(clean)
-            
     except Exception as e:
-        st.error(f"AI Error: {str(e)}")
-        # Show what we got to help debug
-        with st.expander("See Raw AI Response"):
-            st.code(response.text if 'response' in locals() else "No response")
         return None
 
 # 4. INVENTORY FILTER (Tab 1 Search)

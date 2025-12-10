@@ -364,6 +364,9 @@ with current_tabs[2]:
              for item in recs['missing_list']:
                  clean_name = item['tool_name'].replace("**", "").strip()
                  st.markdown(f"**{clean_name}** ({item['importance']})")
+                 if item.get('reason'):
+                      st.write(f"_{item['reason']}_")
+                 
                  st.caption(f"💡 *Advice: {item['advice']}*")
 
         if recs.get('borrow_list'):
