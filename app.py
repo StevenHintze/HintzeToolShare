@@ -298,7 +298,7 @@ with current_tabs[2]:
             if project_query:
                 with st.spinner("Planning and Looking for Tools..."):
                     all_tools_df = dm.con.execute("SELECT * FROM tools").df()
-                    recs = get_smart_recommendations(project_query, all_tools_df, current_user['household'])
+                    recs = get_smart_recommendations(project_query, all_tools_df, current_user['household'], current_user['name'])
                     if recs:
                         st.session_state["ai_recs"] = recs
                         st.rerun()
