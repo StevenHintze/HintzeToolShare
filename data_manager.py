@@ -4,23 +4,50 @@ import pandas as pd
 import uuid
 import json
 import datetime
-import requests # <--- Critical for Discord Webhooks
+import requests
 
 class DataManager:
     def __init__(self):
-        try:
-            token = st.secrets["MOTHERDUCK_TOKEN"]
-            self.con_str = f'md:?motherduck_token={token}'
-        except FileNotFoundError:
-            self.con_str = 'inventory.db' 
+        # 1. DIAGNOSTIC: Check if Secret exists
+        if "MOTHERDUCK_TOKEN" not in st.secrets:
+            st.error("🚨 Critical Error: 'MOTHERDUCK_TOKEN' is missing from Streamlit Secrets.")
+            st.stop()
+            
+        token = st.secrets["MOTHERDUCK_TOKEN"]
         
-        self.con = duckdb.connect(self.con_str)
+        # 2. VALIDATION: Check for common copy-paste errors
+        if not token or token.strip() == "":
+            st.error("🚨 Critical Error: MotherDuck Token is empty.")
+            st.stop()
+            
+        self.con_str = f'md:?motherduck_token={token}'
+        
+        # 3. CONNECTION: strict cloud connection
+        try:
+            self.con = duckdb.connect(self.con_str)
+            # Verify connection is alive
+            self.con.execute("SELECT 1")
+        except Exception as e:
+            st.error(f"""
+            **❌ Database Connection Failed**
+            
+            We could not connect to the Cloud Database.
+            
+            **Technical Error:** `{str(e)}`
+            
+            **Troubleshooting:**
+            1. Go to Streamlit Cloud -> App -> Settings -> Secrets.
+            2. Verify `MOTHERDUCK_TOKEN` is correct.
+            3. Ensure there are no extra quotes inside the string.
+            """)
+            st.stop()
+
+        # 4. INITIALIZE
         self.con.execute("CREATE DATABASE IF NOT EXISTS hintze_inventory")
         self.con.execute("USE hintze_inventory")
         self._init_schema()
 
     def _init_schema(self):
-        # 1. Tools Table
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS tools (
                 id VARCHAR PRIMARY KEY,
@@ -40,7 +67,6 @@ class DataManager:
             )
         """)
         
-        # 2. Family Table
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS family (
                 name VARCHAR,
@@ -50,7 +76,6 @@ class DataManager:
             )
         """)
 
-        # 3. History Table
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS tool_history (
                 history_id VARCHAR,
@@ -61,7 +86,6 @@ class DataManager:
             )
         """)
         
-        # 4. Sessions Table
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 token VARCHAR PRIMARY KEY,
@@ -71,7 +95,6 @@ class DataManager:
             )
         """)
 
-        # 5. Audit Log Table (Security)
         self.con.execute("""
             CREATE TABLE IF NOT EXISTS audit_logs (
                 log_id VARCHAR PRIMARY KEY,
@@ -133,13 +156,11 @@ class DataManager:
             """, [row['name'], row['brand'], row['model_no'], row['household'], row['bin_location'], row['is_stationary'], row['capabilities'], row['safety_rating'], row['id']])
 
     def purge_old_history(self, days=30):
-        # 1. Count them first
         count = self.con.execute(f"""
             SELECT count(*) FROM tool_history 
             WHERE change_date < current_timestamp - INTERVAL '{days} days'
         """).fetchone()[0]
         
-        # 2. Delete them
         if count > 0:
             self.con.execute(f"""
                 DELETE FROM tool_history 
@@ -149,17 +170,14 @@ class DataManager:
 
     # --- Security Logging ---
     def log_event(self, event_type, email, details):
-        """Writes an event to DB and optionally sends an alert."""
         log_id = str(uuid.uuid4())
         self.con.execute("INSERT INTO audit_logs VALUES (?, current_timestamp, ?, ?, ?)", 
                          [log_id, event_type, email, details])
         
-        # Trigger Webhook for important events
         if event_type in ["FAILED_LOGIN", "ADMIN_UPDATE"] or "RETIRE" in details:
             self._send_discord_alert(event_type, email, details)
 
     def _send_discord_alert(self, event_type, email, details):
-        """Private helper to fire the webhook."""
         webhook_url = st.secrets.get("DISCORD_WEBHOOK")
         if not webhook_url: return
 
@@ -177,7 +195,7 @@ class DataManager:
         try:
             requests.post(webhook_url, json=data)
         except:
-            pass # Fail silently if discord is down
+            pass 
 
     # --- Standard Methods ---
     def borrow_tool(self, tool_id, user, days):
