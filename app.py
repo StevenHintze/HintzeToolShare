@@ -364,11 +364,11 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
         with st.expander("⬇️ Borrow Tools (For You)", expanded=True):
             st.caption("Quickly borrow tools for yourself.")
             all_tools_borrow = dm.con.execute("SELECT * FROM tools").df()
-            # Filter: Available, Not Stationary, AND Not Owned by Me
+            # Filter: Available, Not Stationary, AND Not In My Household
             available_only = all_tools_borrow[
                 (all_tools_borrow['status'] == 'Available') & 
                 (all_tools_borrow['is_stationary'] != True) &
-                (all_tools_borrow['owner'] != current_user['name'])
+                (all_tools_borrow['household'] != current_user['household'])
             ]
             
             if not available_only.empty:
