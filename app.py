@@ -8,7 +8,7 @@ import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.35", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.36", page_icon="🛠️")
 
 # Initialize DB
 dm = DataManager()
