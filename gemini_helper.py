@@ -117,10 +117,25 @@ def get_smart_recommendations(user_query, available_tools_df, user_household, us
     try:
         model = genai.GenerativeModel('gemini-2.5-flash') 
         response = model.generate_content(prompt)
-        clean = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(clean)
+        
+        # Try to find JSON object structure
+        text = response.text
+        start = text.find('{')
+        end = text.rfind('}') + 1
+        
+        if start != -1 and end != -1:
+            clean = text[start:end]
+            return json.loads(clean)
+        else:
+            # Fallback to simple ref cleaning
+            clean = text.replace("```json", "").replace("```", "").strip()
+            return json.loads(clean)
+            
     except Exception as e:
-        st.error(f"AI Error: {e}")
+        st.error(f"AI Error: {str(e)}")
+        # Show what we got to help debug
+        with st.expander("See Raw AI Response"):
+            st.code(response.text if 'response' in locals() else "No response")
         return None
 
 # 4. INVENTORY FILTER (Tab 1 Search)
