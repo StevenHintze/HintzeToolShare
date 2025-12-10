@@ -2,15 +2,16 @@ import streamlit as st
 import extra_streamlit_components as stx
 from data_manager import DataManager
 from tools_registry import check_safety 
+# IMPORT ALL FUNCTIONS including parse_lending_request
 from gemini_helper import ai_parse_tool, get_ai_advice, get_smart_recommendations, ai_filter_inventory, parse_location_update, check_duplicate_tool, parse_lending_request
 import time
 import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.38", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.39", page_icon="🛠️")
 
-# Initialize DB
+# Initialize DB (Fail-Safe + Cached)
 dm = DataManager()
 dm.seed_data([], []) 
 
@@ -28,6 +29,7 @@ st.markdown("""
             border: 1px solid rgba(255, 255, 255, 0.3);
             box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
             border-radius: 12px;
+            
             display: flex;
             flex-direction: row;
             align-items: flex-start;
@@ -91,7 +93,7 @@ def save_tool_callback():
              st.session_state['tool_caps'], 
              st.session_state['tool_safety']))
         
-        dm_cb.clear_cache() # Invalidate cache so new tool appears immediately
+        dm_cb.clear_cache() # Refresh Cache
         
         st.toast(
             f"""
@@ -103,6 +105,7 @@ def save_tool_callback():
         st.session_state['admin_error'] = None
         st.session_state['dup_warning'] = None
         
+        # Clear form but KEEP defaults
         st.session_state['tool_name'] = ""
         st.session_state['tool_brand'] = ""
         st.session_state['tool_model'] = ""
@@ -203,8 +206,8 @@ with current_tabs[0]:
     with c2:
         use_ai = st.toggle("AI Search", value=True)
 
-    # USE CACHED QUERY
-    all_tools = dm.get_all_tools() 
+    # Cached Query
+    all_tools = dm.get_all_tools()
     filtered_df = all_tools
     
     if query:
@@ -233,10 +236,11 @@ with current_tabs[0]:
     
     filtered_df['Display Status'] = filtered_df.apply(get_status_display, axis=1)
 
+    # Fixed Width Casing
     st.dataframe(
         filtered_df[['name', 'brand', 'Display Status', 'Location Info', 'return_date']],
         column_config={"return_date": st.column_config.DatetimeColumn("Due Back", format="D MMM")},
-        width='stretch'
+        width="stretch" 
     )
 
     st.markdown("---")
@@ -294,7 +298,7 @@ with current_tabs[1]:
             return "🟢 On Track"
         my_loans['Status'] = my_loans['Due In'].apply(color_status)
 
-        st.dataframe(my_loans[['name', 'brand', 'household', 'return_date', 'Status']])
+        st.dataframe(my_loans[['name', 'brand', 'household', 'return_date', 'Status']], width="stretch")
         
         tool_to_return = st.selectbox("Select tool to return:", my_loans['name'], key="return_select")
         if st.button("✅ Return Selected Tool"):
@@ -310,7 +314,7 @@ with current_tabs[1]:
     st.subheader("👀 Who has my stuff?")
     if not my_assets.empty:
         st.warning(f"You have {len(my_assets)} tools currently loaned out.")
-        st.dataframe(my_assets[['name', 'borrower', 'return_date']])
+        st.dataframe(my_assets[['name', 'borrower', 'return_date']], width="stretch")
         
         tool_back = st.selectbox("Select tool received:", my_assets['name'], key="owner_return_select")
         if st.button("📥 Mark as Received"):
@@ -390,7 +394,7 @@ with current_tabs[2]:
         elif not recs.get('missing_list'):
             st.info("Looks like you have everything you need at home! Good luck.")
 
-# TAB 4: Lending Center
+# TAB 4: Lending Center (RESTORED)
 if current_user['role'] in ["ADMIN", "ADULT"]:
     with current_tabs[3]:
         st.header("🤝 Lending Center")
@@ -413,7 +417,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 st.caption("Describe what happened naturally (e.g., 'I lent the drill to Shawn').")
                 with st.form("ai_lending_form"):
                     lending_query = st.text_input("Tell me what's happening:", placeholder="Type here and press Enter...")
-                    submitted = st.form_submit_button("Analyze Request", width='stretch')
+                    submitted = st.form_submit_button("Analyze Request", use_container_width=True)
                 
                 if submitted and lending_query:
                     with st.spinner("Processing..."):
@@ -516,6 +520,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                             dm.borrow_tool(tid, borrower, days)
                             success_count += 1
                         
+                        dm.clear_cache()
                         st.toast(f"Successfully lent {success_count} tools to {borrower}!", icon="✅")
                         st.session_state['lend_stage'] = 'manual'
                         st.session_state['lend_data'] = None
@@ -537,7 +542,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 with c_act_1:
                     move_query = st.text_input("Action Description:", placeholder="e.g. 'I sold the miter saw'", key="move_input")
                 with c_act_2:
-                    preview_btn = st.form_submit_button("Review Action", width='stretch')
+                    preview_btn = st.form_submit_button("Review Action", use_container_width=True)
 
             if preview_btn and move_query:
                 with st.spinner("Analyzing..."):
@@ -569,9 +574,9 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
             if st.session_state.get('pending_moves'):
                 st.markdown("#### 🛡️ Verify Changes")
                 df_review = pd.DataFrame(st.session_state['pending_moves'])
-                st.dataframe(df_review[["Tool", "Action"]], width='stretch', hide_index=True)
+                st.dataframe(df_review[["Tool", "Action"]], use_container_width=True, hide_index=True)
                 c_y, c_n = st.columns(2)
-                if c_y.button("Confirm Update", type="primary", width='stretch'):
+                if c_y.button("Confirm Update", type="primary", use_container_width=True):
                     count = 0
                     for change in st.session_state['pending_moves']:
                         data = change['_data']
@@ -581,11 +586,12 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                         else:
                             dm.update_tool_location(change['ID'], change['_bin'], change['_house'], current_user['name'])
                         count += 1
+                    dm.clear_cache()
                     st.toast(f"**✅ Update Complete**\n\nProcessed **{count}** items.", icon="📦")
                     st.session_state['pending_moves'] = None
                     time.sleep(1)
                     st.rerun()
-                if c_n.button("Cancel", width='stretch'):
+                if c_n.button("Cancel", use_container_width=True):
                     st.session_state['pending_moves'] = None
                     st.rerun()
 
@@ -637,7 +643,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 quick_owner = st.selectbox("Who Owns It?", ALL_OWNERS, index=default_owner_idx, key="ai_owner_select")
             with c2: 
                 raw_input = st.text_input("Paste Description", key="ai_input")
-            trigger_ai = st.form_submit_button("✨ Auto-Fill", width='stretch')
+            trigger_ai = st.form_submit_button("✨ Auto-Fill", use_container_width=True)
 
         if trigger_ai and raw_input:
             with st.spinner("Analyzing..."):
@@ -671,7 +677,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     st.session_state['tool_household'] = OWNER_HOMES.get(final_owner, current_user['household'])
                     
                     st.toast("AI Generated Details - Please Check for Accuracy.", icon="🤖")
-                    time.sleep(2.5) # Allow toast to be seen
+                    time.sleep(2.5) 
                     st.rerun()
 
         if st.session_state.get('dup_warning'):
@@ -707,4 +713,4 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
             st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], key="tool_safety")
             st.text_input("Capabilities", key="tool_caps")
             
-            st.form_submit_button("💾 Add to Tool Registry", width='stretch', on_click=save_tool_callback)
+            st.form_submit_button("💾 Add to Tool Registry", use_container_width=True, on_click=save_tool_callback)
