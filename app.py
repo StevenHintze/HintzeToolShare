@@ -360,6 +360,8 @@ with current_tabs[2]:
             st.error("🛑 **Missing Essentials (Not in Family Registry):**")
             for item in recs['missing_list']:
                 st.markdown(f"**{item['tool_name']}** ({item['importance']})")
+                if item.get('reason'):
+                     st.write(f"{item['reason']}")
                 st.caption(f"💡 *Advice: {item['advice']}*")
 
         if recs.get('borrow_list'):

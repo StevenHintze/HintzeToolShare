@@ -101,7 +101,7 @@ def get_smart_recommendations(user_query, available_tools_df, user_household):
         "locate_list": [{"tool_name": "Exact Name", "location": "Bin/Shelf"}],
         "track_down_list": [{"tool_name": "Exact Name", "held_by": "Borrower Name"}],
         "borrow_list": [{"name": "Tool Name", "household": "Owner House", "tool_id": "ID", "reason": "Why needed"}],
-        "missing_list": [{"tool_name": "Tool Name", "importance": "High/Med/Low", "advice": "Buy/Rent"}]
+        "missing_list": [{"tool_name": "Tool Name", "importance": "High/Med/Low", "advice": "Buy/Rent", "reason": "Explanation of why this tool is needed"}]
     }
     """
     
