@@ -236,7 +236,7 @@ with current_tabs[0]:
     st.dataframe(
         filtered_df[['name', 'brand', 'Display Status', 'Location Info', 'return_date']],
         column_config={"return_date": st.column_config.DatetimeColumn("Due Back", format="D MMM")},
-        witdth='stretch'
+        width='stretch'
     )
 
     st.markdown("---")
@@ -433,7 +433,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     st.caption("Describe what happened naturally (e.g., 'I lent the drill to Shawn').")
                     with st.form("ai_lending_form"):
                         lending_query = st.text_input("Tell me what's happening:", placeholder="Type here and press Enter...")
-                        submitted = st.form_submit_button("Analyze Request", witdth='stretch')
+                        submitted = st.form_submit_button("Analyze Request", width='stretch')
                     
                     if submitted and lending_query:
                         with st.spinner("Processing..."):
@@ -564,7 +564,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 with c_act_1:
                     move_query = st.text_input("Action Description:", placeholder="e.g. 'I sold the miter saw'", key="move_input")
                 with c_act_2:
-                    preview_btn = st.form_submit_button("Review Action", witdth='stretch')
+                    preview_btn = st.form_submit_button("Review Action", width='stretch')
 
             if preview_btn and move_query:
                 with st.spinner("Analyzing..."):
@@ -596,9 +596,9 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
             if st.session_state.get('pending_moves'):
                 st.markdown("#### 🛡️ Verify Changes")
                 df_review = pd.DataFrame(st.session_state['pending_moves'])
-                st.dataframe(df_review[["Tool", "Action"]], witdth='stretch', hide_index=True)
+                st.dataframe(df_review[["Tool", "Action"]], width='stretch', hide_index=True)
                 c_y, c_n = st.columns(2)
-                if c_y.button("Confirm Update", type="primary", witdth='stretch'):
+                if c_y.button("Confirm Update", type="primary", width='stretch'):
                     count = 0
                     for change in st.session_state['pending_moves']:
                         data = change['_data']
@@ -612,7 +612,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     st.session_state['pending_moves'] = None
                     time.sleep(1)
                     st.rerun()
-                if c_n.button("Cancel", witdth='stretch'):
+                if c_n.button("Cancel", width='stretch'):
                     st.session_state['pending_moves'] = None
                     st.rerun()
 
@@ -664,7 +664,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 quick_owner = st.selectbox("Who Owns It?", ALL_OWNERS, index=default_owner_idx, key="ai_owner_select")
             with c2: 
                 raw_input = st.text_input("Paste Description", key="ai_input")
-            trigger_ai = st.form_submit_button("✨ Click for AI to Generate Details Below", witdth='stretch')
+            trigger_ai = st.form_submit_button("✨ Click for AI to Generate Details Below", width='stretch')
 
         if trigger_ai and raw_input:
             with st.spinner("Analyzing..."):
@@ -734,4 +734,4 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
             st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], key="tool_safety")
             st.text_input("Capabilities", key="tool_caps")
             
-            st.form_submit_button("💾 Add to Tool Registry", witdth='stretch', on_click=save_tool_callback)
+            st.form_submit_button("💾 Add to Tool Registry", width='stretch', on_click=save_tool_callback)
