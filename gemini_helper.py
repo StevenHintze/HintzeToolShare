@@ -251,7 +251,22 @@ def parse_lending_request(user_query, my_tools_df, family_list):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)
-        clean = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(clean)
-    except:
+        
+        # Robust JSON extraction
+        text = response.text
+        start = text.find('{')
+        end = text.rfind('}') + 1
+        
+        if start != -1 and end != -1:
+            clean = text[start:end]
+            return json.loads(clean)
+        else:
+            clean = text.replace("```json", "").replace("```", "").strip()
+            return json.loads(clean)
+            
+    except Exception as e:
+        st.error(f"Lending AI Error: {str(e)}")
+        # Debug helper
+        with st.expander("Raw AI Response"):
+             st.text(response.text if 'response' in locals() else "No response")
         return None

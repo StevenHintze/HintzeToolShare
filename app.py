@@ -452,6 +452,8 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                                     st.session_state['lend_data'] = result
                             else:
                                 st.error("Could not understand request.")
+                                st.session_state['lend_stage'] = 'manual'
+                                st.session_state['lend_data'] = None
 
             if st.session_state.get('lend_stage') == 'refine' and st.session_state.get('lend_data'):
                 st.divider()
