@@ -8,7 +8,7 @@ import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.36", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.37", page_icon="🛠️")
 
 # Initialize DB
 dm = DataManager()
@@ -311,27 +311,32 @@ with current_tabs[2]:
         if recs.get('locate_list'):
             st.success("✅ **You already own these:**")
             for item in recs['locate_list']:
-                st.markdown(f"- **{item['tool_name']}** ({item.get('location', 'Home')})")
+                # Clean name to avoid double bolding issues
+                clean_name = item['tool_name'].replace("**", "").strip()
+                st.markdown(f"- **{clean_name}** ({item.get('location', 'Home')})")
         
         if recs.get('track_down_list'):
             st.warning("⚠️ **You own these, but they are gone:**")
             for item in recs['track_down_list']:
-                st.markdown(f"- **{item['tool_name']}** is with **{item['held_by']}**")
+                clean_name = item['tool_name'].replace("**", "").strip()
+                st.markdown(f"- **{clean_name}** is with **{item['held_by']}**")
 
         if recs.get('missing_list'):
-            st.error("🛑 **Missing Essentials (Not in Family Registry):**")
-            for item in recs['missing_list']:
-                st.markdown(f"**{item['tool_name']}** ({item['importance']})")
-                if item.get('reason'):
-                     st.write(f"{item['reason']}")
-                st.caption(f"💡 *Advice: {item['advice']}*")
+             st.error("🛑 **Missing Essentials (Not in Family Registry):**")
+             for item in recs['missing_list']:
+                 clean_name = item['tool_name'].replace("**", "").strip()
+                 st.markdown(f"**{clean_name}** ({item['importance']})")
+                 if item.get('reason'):
+                      st.write(f"{item['reason']}")
+                 st.caption(f"💡 *Advice: {item['advice']}*")
 
         if recs.get('borrow_list'):
             st.info("🛒 **Tools to Borrow:**")
             with st.form("smart_borrow"):
                 selected_ids = []
                 for item in recs['borrow_list']:
-                    label = f"**{item['name']}** from {item['household']}"
+                    clean_name = item['name'].replace("**", "").strip()
+                    label = f"**{clean_name}** from {item['household']}"
                     if item.get('tool_id') and item['tool_id'] != "Unknown":
                         if st.checkbox(label, value=True, help=item['reason']):
                             selected_ids.append(item['tool_id'])
@@ -359,7 +364,12 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
         with st.expander("⬇️ Borrow Tools (For You)", expanded=True):
             st.caption("Quickly borrow tools for yourself.")
             all_tools_borrow = dm.con.execute("SELECT * FROM tools").df()
-            available_only = all_tools_borrow[(all_tools_borrow['status'] == 'Available') & (all_tools_borrow['is_stationary'] != True)]
+            # Filter: Available, Not Stationary, AND Not Owned by Me
+            available_only = all_tools_borrow[
+                (all_tools_borrow['status'] == 'Available') & 
+                (all_tools_borrow['is_stationary'] != True) &
+                (all_tools_borrow['owner'] != current_user['name'])
+            ]
             
             if not available_only.empty:
                 with st.form("manual_borrow_multi"):
