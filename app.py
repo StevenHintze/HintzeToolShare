@@ -8,7 +8,7 @@ import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.41", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.43", page_icon="🛠️")
 
 # Initialize DB (Fail-Safe + Cached)
 dm = DataManager()
@@ -92,7 +92,7 @@ def save_tool_callback():
              st.session_state['tool_caps'], 
              st.session_state['tool_safety']))
         
-        dm_cb.clear_cache() # REFRESH CACHE
+        dm_cb.clear_cache() # Refresh Cache
         
         st.toast(
             f"""
@@ -104,6 +104,7 @@ def save_tool_callback():
         st.session_state['admin_error'] = None
         st.session_state['dup_warning'] = None
         
+        # Clear form but KEEP defaults
         st.session_state['tool_name'] = ""
         st.session_state['tool_brand'] = ""
         st.session_state['tool_model'] = ""
@@ -257,23 +258,7 @@ with current_tabs[0]:
                 if check_safety(current_user['role'], tool_row['safety_rating']):
                     dm.borrow_tool(tool_row['id'], current_user['name'], days)
                     st.success(f"✅ You borrowed the {target_tool_name}!")
-                    
-                    pickup_household = tool_row['household']
-                    resident_name = None
-                    for owner, house in OWNER_HOMES.items():
-                        if house == pickup_household:
-                            resident_name = owner
-                            break
-                    
-                    if resident_name:
-                        courier_candidates = all_tools[(all_tools['borrower'] == resident_name) & (all_tools['status'] == 'Borrowed')]
-                        if not courier_candidates.empty:
-                            st.info(f"🚛 **Courier Opportunity!**")
-                            st.write(f"Since you are going to **{pickup_household}**, {resident_name} has these items checked out:")
-                            for idx, c_row in courier_candidates.iterrows():
-                                st.markdown(f"- **{c_row['name']}** (Owned by {c_row['owner']})")
-                            st.caption("Ask them if you can return these for them!")
-                    time.sleep(6)
+                    time.sleep(1.5)
                     st.rerun()
                 else:
                     st.error("🚫 Safety Restriction.")
@@ -366,7 +351,6 @@ with current_tabs[2]:
                  st.markdown(f"**{clean_name}** ({item['importance']})")
                  if item.get('reason'):
                       st.write(f"_{item['reason']}_")
-                 
                  st.caption(f"💡 *Advice: {item['advice']}*")
 
         if recs.get('borrow_list'):
@@ -394,7 +378,7 @@ with current_tabs[2]:
         elif not recs.get('missing_list'):
             st.info("Looks like you have everything you need at home! Good luck.")
 
-# TAB 4: Lending & Borrowing Center (RESTORED DUAL MODE)
+# TAB 4: Lending Center
 if current_user['role'] in ["ADMIN", "ADULT"]:
     with current_tabs[3]:
         st.header("🤝 Lending & Borrowing Center")
@@ -419,7 +403,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     selected_tools = st.multiselect("Select Tools to Borrow:", t_options)
                     days_needed = st.number_input("Days Needed", min_value=1, value=7, key="borrow_days")
                     
-                    if st.form_submit_button("Confirm Borrow Request", width='stretch'):
+                    if st.form_submit_button("Confirm Borrow Request", use_container_width=True):
                         if selected_tools:
                             success_count = 0
                             for t_name in selected_tools:
@@ -431,7 +415,6 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                                     st.error(f"🚫 Safety Restriction on {t_name}")
                             
                             if success_count > 0:
-                                dm.clear_cache()
                                 st.toast(f"✅ Successfully borrowed {success_count} tools!", icon="🚚")
                                 time.sleep(1.5)
                                 st.rerun()
@@ -473,7 +456,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     st.caption("Describe what happened naturally (e.g., 'I lent the drill to Shawn').")
                     with st.form("ai_lending_form"):
                         lending_query = st.text_input("Tell me what's happening:", placeholder="Type here and press Enter...")
-                        submitted = st.form_submit_button("Analyze Request", width='stretch')
+                        submitted = st.form_submit_button("Analyze Request", use_container_width=True)
                     
                     if submitted and lending_query:
                         with st.spinner("Processing..."):
@@ -565,7 +548,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     else:
                         authorized = True
 
-                    if st.form_submit_button("Confirm Loan 🤝"):
+                    if st.form_submit_button("Confirm Loan 🤝", use_container_width=True):
                         if not selected_tool_names:
                             st.error("Select at least one tool.")
                         elif not borrower:
@@ -601,7 +584,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 with c_act_1:
                     move_query = st.text_input("Action Description:", placeholder="e.g. 'I sold the miter saw'", key="move_input")
                 with c_act_2:
-                    preview_btn = st.form_submit_button("Review Action", width='stretch')
+                    preview_btn = st.form_submit_button("Review Action", use_container_width=True)
 
             if preview_btn and move_query:
                 with st.spinner("Analyzing..."):
@@ -633,9 +616,9 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
             if st.session_state.get('pending_moves'):
                 st.markdown("#### 🛡️ Verify Changes")
                 df_review = pd.DataFrame(st.session_state['pending_moves'])
-                st.dataframe(df_review[["Tool", "Action"]], width='stretch', hide_index=True)
+                st.dataframe(df_review[["Tool", "Action"]], width="stretch", hide_index=True)
                 c_y, c_n = st.columns(2)
-                if c_y.button("Confirm Update", type="primary", width='stretch'):
+                if c_y.button("Confirm Update", type="primary", use_container_width=True):
                     count = 0
                     for change in st.session_state['pending_moves']:
                         data = change['_data']
@@ -650,7 +633,7 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                     st.session_state['pending_moves'] = None
                     time.sleep(1)
                     st.rerun()
-                if c_n.button("Cancel", width='stretch'):
+                if c_n.button("Cancel", use_container_width=True):
                     st.session_state['pending_moves'] = None
                     st.rerun()
 
@@ -702,42 +685,50 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
                 quick_owner = st.selectbox("Who Owns It?", ALL_OWNERS, index=default_owner_idx, key="ai_owner_select")
             with c2: 
                 raw_input = st.text_input("Paste Description", key="ai_input")
-            trigger_ai = st.form_submit_button("✨ Auto-Fill", width='stretch')
+            # UPDATED BUTTON TEXT AND PROGRESS BAR LOGIC
+            trigger_ai = st.form_submit_button("✨ Click to Generate Details with AI", use_container_width=True)
 
         if trigger_ai and raw_input:
-            with st.spinner("Analyzing..."):
-                ai_data = ai_parse_tool(raw_input)
-                if ai_data:
-                    st.session_state['tool_name'] = ai_data.get('name', '')
-                    st.session_state['tool_brand'] = ai_data.get('brand', '')
-                    st.session_state['tool_model'] = ai_data.get('model_no', '')
-                    st.session_state['tool_caps'] = ai_data.get('capabilities', '')
-                    st.session_state['tool_stationary'] = ai_data.get('is_stationary', False)
-                    
-                    # DUPLICATE CHECK
-                    all_inv = dm.get_all_tools() # Cached
-                    target_house = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0]) if quick_owner else ALL_HOUSEHOLDS[0]
-                    house_tools = all_inv[all_inv['household'] == target_house]
-                    if not house_tools.empty:
-                        dup = check_duplicate_tool(ai_data, house_tools)
-                        if dup and dup.get('is_duplicate'):
-                            st.session_state['dup_warning'] = f"⚠️ **Possible Duplicate:** Similar to **{dup['match_name']}** already in **{target_house}** household."
-                        else: st.session_state['dup_warning'] = None
+            progress_text = "🤖 AI is analyzing your tool..."
+            my_bar = st.progress(0, text=progress_text)
+            
+            ai_data = ai_parse_tool(raw_input)
+            my_bar.progress(40, text="Parsing details...")
+            
+            if ai_data:
+                st.session_state['tool_name'] = ai_data.get('name', '')
+                st.session_state['tool_brand'] = ai_data.get('brand', '')
+                st.session_state['tool_model'] = ai_data.get('model_no', '')
+                st.session_state['tool_caps'] = ai_data.get('capabilities', '')
+                st.session_state['tool_stationary'] = ai_data.get('is_stationary', False)
+                
+                # DUPLICATE CHECK
+                my_bar.progress(70, text="Checking for duplicates...")
+                all_inv = dm.get_all_tools() # Cached
+                target_house = OWNER_HOMES.get(quick_owner, ALL_HOUSEHOLDS[0]) if quick_owner else ALL_HOUSEHOLDS[0]
+                house_tools = all_inv[all_inv['household'] == target_house]
+                if not house_tools.empty:
+                    dup = check_duplicate_tool(ai_data, house_tools)
+                    if dup and dup.get('is_duplicate'):
+                        st.session_state['dup_warning'] = f"⚠️ **Possible Duplicate:** Similar to **{dup['match_name']}** already in **{target_house}** household."
                     else: st.session_state['dup_warning'] = None
+                else: st.session_state['dup_warning'] = None
 
-                    try: 
-                        p_list = ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"]
-                        st.session_state['tool_power'] = ai_data.get('power_source', 'Manual') if ai_data.get('power_source', 'Manual') in p_list else "Manual"
-                    except: st.session_state['tool_power'] = "Manual"
-                    
-                    # FIX: Use quick_owner if selected, else default to current user
-                    final_owner = quick_owner if quick_owner else current_user['name']
-                    st.session_state['tool_owner'] = final_owner
-                    st.session_state['tool_household'] = OWNER_HOMES.get(final_owner, current_user['household'])
-                    
-                    st.toast("AI Generated Details - Please Check for Accuracy.", icon="🤖")
-                    time.sleep(2.5) 
-                    st.rerun()
+                try: 
+                    p_list = ["Manual", "Corded", "Battery", "Gas", "Pneumatic", "Hydraulic"]
+                    st.session_state['tool_power'] = ai_data.get('power_source', 'Manual') if ai_data.get('power_source', 'Manual') in p_list else "Manual"
+                except: st.session_state['tool_power'] = "Manual"
+                
+                final_owner = quick_owner if quick_owner else current_user['name']
+                st.session_state['tool_owner'] = final_owner
+                st.session_state['tool_household'] = OWNER_HOMES.get(final_owner, current_user['household'])
+                
+                my_bar.progress(100, text="Done!")
+                time.sleep(0.5)
+                my_bar.empty()
+                st.toast("AI Generated Details - Please Check for Accuracy.", icon="🤖")
+                time.sleep(2.5) 
+                st.rerun()
 
         if st.session_state.get('dup_warning'):
             st.warning(st.session_state['dup_warning'])
@@ -772,4 +763,4 @@ if current_user['role'] in ["ADMIN", "ADULT"]:
             st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], key="tool_safety")
             st.text_input("Capabilities", key="tool_caps")
             
-            st.form_submit_button("💾 Add to Tool Registry", width='stretch', on_click=save_tool_callback)
+            st.form_submit_button("💾 Add to Tool Registry", use_container_width=True, on_click=save_tool_callback)
