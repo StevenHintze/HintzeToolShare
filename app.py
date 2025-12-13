@@ -292,7 +292,9 @@ if selected_id != st.session_state['nav_tab']:
     st.rerun()
 
 # Auto-scroll to selected item (JavaScript Injection - Robust Polling)
-ts = int(time.time() * 1000)
+# Auto-scroll to selected item (JavaScript Injection - Robust Polling)
+# Only re-run when the tab changes (using the tab ID as part of the key/content)
+scroll_key = f"scroll_{st.session_state['nav_tab']}"
 components.html(f"""
     <script>
         (function() {{
@@ -329,7 +331,7 @@ components.html(f"""
             setTimeout(scrollToActive, 100);
         }})();
     </script>
-    <div style="display:none;">{ts}</div>
+    <div style="display:none;">{scroll_key}</div>
 """, height=0)
 
 # TAB 1: Inventory
