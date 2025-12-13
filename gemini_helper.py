@@ -1,18 +1,27 @@
-import google.generativeai as genai
+import vertexai
+from vertexai.generative_models import GenerativeModel
 import streamlit as st
 import json
 import time
 
 def configure_genai():
     try:
-        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        # Vertex AI Initialization
+        project_id = st.secrets.get("GCP_PROJECT")
+        location = st.secrets.get("GCP_LOCATION", "us-west4") # Default to Las Vegas (closest to Phoenix)
+        
+        if not project_id:
+            st.error("⚠️ Config Error: GCP_PROJECT not found in secrets.")
+            return False
+            
+        vertexai.init(project=project_id, location=location)
         return True
     except Exception as e:
         st.error(f"Config Error: {e}")
         return False
 
 def handle_ai_error(e):
-    if "429" in str(e):
+    if "429" in str(e) or "429" in str(e.args):
         st.warning("🚦 **AI Traffic Limit:** System busy. Please wait 30s and try again.")
         return None
     st.error(f"⚠️ AI Error: {str(e)}")
@@ -20,7 +29,7 @@ def handle_ai_error(e):
 
 # 1. SHOP TEACHER
 def get_ai_advice(user_query, available_tools_df):
-    if not configure_genai(): return "⚠️ API Key Missing"
+    if not configure_genai(): return "⚠️ Configuration Missing"
     
     tool_context = ""
     for index, row in available_tools_df.iterrows():
@@ -35,7 +44,7 @@ def get_ai_advice(user_query, available_tools_df):
     USER QUESTION: "{user_query}"
     """
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash') 
+        model = GenerativeModel('gemini-2.5-flash') 
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
@@ -46,7 +55,7 @@ def get_ai_advice(user_query, available_tools_df):
 def ai_parse_tool(raw_text):
     if not configure_genai(): return None
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = GenerativeModel('gemini-2.5-flash')
         prompt = f"""
         Analyze tool description. INPUT: "{raw_text}"
         REQUIREMENTS: Name (Title Case), Brand, Model, Power, Safety, Capabilities, Stationary.
@@ -113,7 +122,7 @@ def get_smart_recommendations(user_query, available_tools_df, user_household, us
     
     prompt = prompt_base + json_structure
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash') 
+        model = GenerativeModel('gemini-2.5-flash') 
         response = model.generate_content(prompt)
         text = response.text
         start = text.find('{')
@@ -139,7 +148,7 @@ def ai_filter_inventory(user_query, inventory_df):
     Return JSON list of matching IDs: {{ "match_ids": ["ID1", "ID2"] }}
     """
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)
         clean = response.text.replace("```json", "").replace("```", "").strip()
         return json.loads(clean).get("match_ids", [])
@@ -160,7 +169,7 @@ def parse_location_update(user_query, user_tools_df):
     OUTPUT JSON: {{ "updates": [ {{ "tool_id": "...", "action": "MOVE/RETIRE", "new_bin": "...", "reason": "..." }} ] }}
     """
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)
         clean = response.text.replace("```json", "").replace("```", "").strip()
         return json.loads(clean)
@@ -183,7 +192,7 @@ def check_duplicate_tool(new_tool_data, inventory_df):
     OUTPUT JSON: {{ "is_duplicate": true/false, "match_name": "...", "match_owner": "..." }}
     """
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)
         clean = response.text.replace("```json", "").replace("```", "").strip()
         return json.loads(clean)
@@ -213,7 +222,7 @@ def parse_lending_request(user_query, my_tools_df, family_list):
     }}
     """
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)
         clean = response.text.replace("```json", "").replace("```", "").strip()
         return json.loads(clean)
