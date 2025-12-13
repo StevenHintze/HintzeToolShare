@@ -9,7 +9,7 @@ import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.51", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.52", page_icon="🛠️")
 
 # Initialize DB (Fail-Safe + Cached)
 # Initialize DB (Fail-Safe + Cached)
@@ -410,7 +410,6 @@ if st.session_state['nav_tab'] == "Arsenal":
 
     st.dataframe(
         filtered_df[['name', 'brand', 'Display Status', 'Location Info', 'return_date']],
-        column_config={"return_date": st.column_config.DatetimeColumn("Due Back", format="D MMM")},
         column_config={"return_date": st.column_config.DatetimeColumn("Due Back", format="D MMM")},
         use_container_width=True
     )
