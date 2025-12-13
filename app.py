@@ -9,7 +9,7 @@ import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.50", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.51", page_icon="🛠️")
 
 # Initialize DB (Fail-Safe + Cached)
 # Initialize DB (Fail-Safe + Cached)
@@ -60,6 +60,33 @@ st.markdown("""
         }
         span[data-baseweb="tag"] {
             color: #000000 !important;
+        }
+        /* Custom Toast Notification */
+        div[data-testid="stToast"] {
+            background-color: #FFD700 !important; /* Yellow */
+            color: #000000 !important;
+            border-radius: 12px !important;
+            padding: 16px !important;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1) !important;
+            align-items: center !important;
+        }
+        /* Toast Content Layout */
+        div[data-testid="stToast"] > div {
+             align-items: center !important;
+        }
+        
+        /* AI Search Toggle - Yellow and Black */
+        /* The container */
+        .stToggle label[data-baseweb="checkbox"] {
+            border-color: transparent;
+        }
+        /* The checked state background (Yellow) */
+        .stToggle input:checked + div {
+            background-color: #FFD700 !important;
+        }
+        /* The checked state circle (Black) */
+        .stToggle input:checked + div > div {
+            background-color: #000000 !important;
         }
         /* Custom Radio Buttons (Navigation) */
         div[role="radiogroup"] > label > div:first-child {
@@ -292,10 +319,12 @@ if selected_id != st.session_state['nav_tab']:
     st.rerun()
 
 # Auto-scroll to selected item (JavaScript Injection - Robust Polling)
-# Auto-scroll to selected item (JavaScript Injection - Robust Polling)
-# Only re-run when the tab changes (using the tab ID as part of the key/content)
-scroll_key = f"scroll_{st.session_state['nav_tab']}"
-components.html(f"""
+# Update 2024-12: Only inject this script if the tab has effectively changed to prevent jumping on interactions.
+if 'last_scrolled_tab' not in st.session_state:
+    st.session_state['last_scrolled_tab'] = None
+
+if st.session_state['nav_tab'] != st.session_state['last_scrolled_tab']:
+    components.html(f"""
     <script>
         (function() {{
             let attempts = 0;
@@ -331,8 +360,9 @@ components.html(f"""
             setTimeout(scrollToActive, 100);
         }})();
     </script>
-    <div style="display:none;">{scroll_key}</div>
+    <div style="display:none;">{st.session_state['nav_tab']}</div>
 """, height=0)
+    st.session_state['last_scrolled_tab'] = st.session_state['nav_tab']
 
 # TAB 1: Inventory
 if st.session_state['nav_tab'] == "Arsenal":
@@ -350,20 +380,20 @@ if st.session_state['nav_tab'] == "Arsenal":
 
     # CACHED QUERY
     all_tools = dm.get_all_tools() 
-    filtered_df = all_tools
+    filtered_df = all_tools.copy()
     
     if query:
         if use_ai:
             with st.spinner("AI is filtering..."):
                 match_ids = ai_filter_inventory(query, all_tools)
-                filtered_df = all_tools[all_tools['id'].isin(match_ids)]
+                filtered_df = all_tools[all_tools['id'].isin(match_ids)].copy()
         else:
             mask = (
                 all_tools['name'].str.contains(query, case=False, na=False) | 
                 all_tools['brand'].str.contains(query, case=False, na=False) |
                 all_tools['capabilities'].str.contains(query, case=False, na=False)
             )
-            filtered_df = all_tools[mask]
+            filtered_df = all_tools[mask].copy()
 
     def format_location(row):
         loc = f"{row['household']} ({row['bin_location']})"
@@ -381,7 +411,8 @@ if st.session_state['nav_tab'] == "Arsenal":
     st.dataframe(
         filtered_df[['name', 'brand', 'Display Status', 'Location Info', 'return_date']],
         column_config={"return_date": st.column_config.DatetimeColumn("Due Back", format="D MMM")},
-        width="stretch"
+        column_config={"return_date": st.column_config.DatetimeColumn("Due Back", format="D MMM")},
+        use_container_width=True
     )
 
     st.markdown("---")
@@ -889,7 +920,7 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
             st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], key="tool_safety")
             st.text_input("Capabilities", key="tool_caps")
             
-            st.form_submit_button("💾 Add to Tool Registry", width='stretch', on_click=save_tool_callback)
+            st.form_submit_button("💾 Add to Tool Registry", use_container_width=True, on_click=save_tool_callback)
 
     st.markdown("---")
     with st.expander("📜 View History of a Tool"):
@@ -914,6 +945,9 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
             st.markdown("#### 👻 Ghost Tool Detector")
             st.caption("Find and manage tools with missing owners.")
             if st.button("Scan for Ghost Tools"):
+                st.session_state['ghost_scan_active'] = True
+                
+            if st.session_state.get('ghost_scan_active', False):
                 ghosts = dm.get_ghost_tools()
                 if not ghosts.empty:
                     count = len(ghosts)
@@ -925,17 +959,24 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
                         if st.button(f"Recall {count} Tools", help=f"Assign all to {current_user['name']}"):
                             dm.batch_reassign_tools(ghosts['id'].tolist(), current_user['name'], current_user['household'])
                             st.toast(f" recalled {count} tools from the void!", icon="🏡")
+                            st.session_state['ghost_scan_active'] = False # Reset
                             time.sleep(1)
                             st.rerun()
                     with c_burn:
-                        if st.button(f"Incinerate {count} Ghost Tools", type="primary"):
+                        # Use a unique key for safety
+                        if st.button(f"Incinerate {count} Ghost Tools", type="primary", key="burn_ghosts_btn"):
                             for tid in ghosts['id'].tolist():
                                 dm.delete_tool(tid, current_user['name'])
                             st.toast(f"Incinerated {count} ghost tools.", icon="🔥")
+                            st.session_state['ghost_scan_active'] = False # Reset
                             time.sleep(1)
                             st.rerun()
                 else:
                     st.success("No ghost tools found! 👻")
+                    # Optional: Auto-hide after a moment or provide a close button
+                    if st.button("Close Scan"):
+                        st.session_state['ghost_scan_active'] = False
+                        st.rerun()
 
             st.divider()
             st.markdown("#### 🔥 Batch Incinerator")

@@ -1,44 +1,71 @@
-import vertexai
-from vertexai.generative_models import GenerativeModel
+import google.genai as genai
+from google.genai import types
 import streamlit as st
 import json
 import time
-import warnings
 
-# Suppress Vertex AI Deprecation Warning (Safe to ignore until June 2026)
-warnings.filterwarnings(
-    "ignore", 
-    message="This feature is deprecated", 
-    category=UserWarning, 
-    module="vertexai.generative_models"
-)
+# Feature Configuration
+# Using gemini-2.0-flash as the new standard model
+DEFAULT_MODEL = "gemini-2.0-flash" 
+CHEAPEST_MODEL = "gemini-2.0-flash-lite"
 
-def configure_genai():
+def get_client():
+    """Initializes and returns the Google Gen AI Client using Service Account API Key."""
     try:
-        # Vertex AI Initialization
+        api_key = st.secrets.get("VERTEX_API_KEY")
         project_id = st.secrets.get("GCP_PROJECT")
-        location = st.secrets.get("GCP_LOCATION", "us-west4") # Default to Las Vegas (closest to Phoenix)
+        location = st.secrets.get("GCP_LOCATION", "us-west4")
         
-        if not project_id:
-            st.error("⚠️ Config Error: GCP_PROJECT not found in secrets.")
-            return False
+        if not api_key:
+            st.error("⚠️ Server Error: VERTEX_API_KEY not found in secrets.")
+            return None
             
-        vertexai.init(project=project_id, location=location)
-        return True
+        # Initialize Client for Vertex AI with API Key (Project/Location inferred or not needed with Key)
+        # Note: 'vertexai=True' enables the Vertex AI backend.
+        client = genai.Client(
+            vertexai=True,
+            api_key=api_key
+        )
+        return client
     except Exception as e:
         st.error(f"Config Error: {e}")
-        return False
+        return None
 
 def handle_ai_error(e):
-    if "429" in str(e) or "429" in str(e.args):
+    err_str = str(e)
+    if "429" in err_str or "Quota exceeded" in err_str:
         st.warning("🚦 **AI Traffic Limit:** System busy. Please wait 30s and try again.")
         return None
-    st.error(f"⚠️ AI Error: {str(e)}")
+    st.error(f"⚠️ AI Error: {err_str}")
     return None
+
+def run_genai_query(prompt, model_name=DEFAULT_MODEL, expected_json=False):
+    """Refactored helper to handle client init and generation."""
+    client = get_client()
+    if not client: return None # Config error already shown
+
+    try:
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt
+        )
+        
+        text = response.text
+        if expected_json:
+            clean = text.replace("```json", "").replace("```", "").strip()
+            # Try to catch simple formatting issues
+            if "{" in clean:
+                return json.loads(clean)
+            return {} # Or raise error?
+            
+        return text
+    except Exception as e:
+        return handle_ai_error(e)
 
 # 1. Project Tool Manager
 def get_ai_advice(user_query, available_tools_df):
-    if not configure_genai(): return "⚠️ Configuration Missing"
+    client = get_client()
+    if not client: return "⚠️ Configuration Missing"
     
     tool_context = ""
     for index, row in available_tools_df.iterrows():
@@ -53,8 +80,10 @@ def get_ai_advice(user_query, available_tools_df):
     USER QUESTION: "{user_query}"
     """
     try:
-        model = GenerativeModel('gemini-2.5-flash') 
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model=DEFAULT_MODEL,
+            contents=prompt
+        )
         return response.text
     except Exception as e:
         if "429" in str(e): return "🚦 System busy (Rate Limit). Please wait 30s."
@@ -62,24 +91,15 @@ def get_ai_advice(user_query, available_tools_df):
 
 # 2. SMART PARSER
 def ai_parse_tool(raw_text):
-    if not configure_genai(): return None
-    try:
-        model = GenerativeModel('gemini-2.5-flash')
-        prompt = f"""
-        Analyze tool description. INPUT: "{raw_text}"
-        REQUIREMENTS: Name (Title Case), Brand, Model, Power, Safety, Capabilities, Stationary.
-        OUTPUT JSON: {{ "name": "...", "brand": "...", "model_no": "...", "power_source": "...", "safety": "...", "capabilities": "...", "is_stationary": true/false }}
-        """
-        response = model.generate_content(prompt)
-        clean = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(clean)
-    except Exception as e:
-        return handle_ai_error(e)
+    prompt = f"""
+    Analyze tool description. INPUT: "{raw_text}"
+    REQUIREMENTS: Name (Title Case), Brand, Model, Power, Safety, Capabilities, Stationary.
+    OUTPUT JSON: {{ "name": "...", "brand": "...", "model_no": "...", "power_source": "...", "safety": "...", "capabilities": "...", "is_stationary": true/false }}
+    """
+    return run_genai_query(prompt, expected_json=True)
 
 # 3. PROJECT PLANNER
 def get_smart_recommendations(user_query, available_tools_df, user_household, user_name):
-    if not configure_genai(): return None
-    
     inventory_list = []
     for index, row in available_tools_df.iterrows():
         status = f"Borrowed by {row.get('borrower')}" if row.get('status') == 'Borrowed' else "Available"
@@ -130,23 +150,25 @@ def get_smart_recommendations(user_query, available_tools_df, user_household, us
     """
     
     prompt = prompt_base + json_structure
+    
+    # Custom logic here as in original: catch structure
+    res = run_genai_query(prompt, expected_json=False) # Get text first
+    if not res: return None
+    if isinstance(res, dict): return res # Should not happen if False above
+    
     try:
-        model = GenerativeModel('gemini-2.5-flash') 
-        response = model.generate_content(prompt)
-        text = response.text
-        start = text.find('{')
-        end = text.rfind('}') + 1
+        start = res.find('{')
+        end = res.rfind('}') + 1
         if start != -1 and end != -1:
-            return json.loads(text[start:end])
+            return json.loads(res[start:end])
         else:
-            clean = text.replace("```json", "").replace("```", "").strip()
+            clean = res.replace("```json", "").replace("```", "").strip()
             return json.loads(clean)
-    except Exception as e:
-        return handle_ai_error(e)
+    except:
+        return None
 
 # 4. INVENTORY FILTER
 def ai_filter_inventory(user_query, inventory_df):
-    if not configure_genai(): return []
     context = ""
     for index, row in inventory_df.iterrows():
         context += f"ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']} | Cap: {row['capabilities']}\n"
@@ -154,19 +176,15 @@ def ai_filter_inventory(user_query, inventory_df):
     prompt = f"""
     Search Engine. Query: "{user_query}"
     Inventory: {context}
-    Return JSON list of matching IDs: {{ "match_ids": ["ID1", "ID2"] }}
+    return JSON list of matching IDs: {{ "match_ids": ["ID1", "ID2"] }}
     """
-    try:
-        model = GenerativeModel('gemini-2.0-flash-lite-001')
-        response = model.generate_content(prompt)
-        clean = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(clean).get("match_ids", [])
-    except:
-        return []
+    res = run_genai_query(prompt, model_name=CHEAPEST_MODEL, expected_json=True)
+    if res and isinstance(res, dict):
+        return res.get("match_ids", [])
+    return []
 
 # 5. SMART MOVER
 def parse_location_update(user_query, user_tools_df):
-    if not configure_genai(): return None
     tool_list_str = ""
     for index, row in user_tools_df.iterrows():
         tool_list_str += f"- ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']}\n"
@@ -177,17 +195,10 @@ def parse_location_update(user_query, user_tools_df):
     TASK: Identify action (MOVE or RETIRE).
     OUTPUT JSON: {{ "updates": [ {{ "tool_id": "...", "action": "MOVE/RETIRE", "new_bin": "...", "reason": "..." }} ] }}
     """
-    try:
-        model = GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(prompt)
-        clean = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(clean)
-    except Exception as e:
-        return handle_ai_error(e)
+    return run_genai_query(prompt, expected_json=True)
 
 # 6. DUPLICATE CHECKER
 def check_duplicate_tool(new_tool_data, inventory_df):
-    if not configure_genai(): return None
     existing_list = []
     for index, row in inventory_df.iterrows():
         existing_list.append(f"Name: {row['name']} | Brand: {row['brand']} | Model: {row['model_no']} | Owner: {row['owner']}")
@@ -200,18 +211,10 @@ def check_duplicate_tool(new_tool_data, inventory_df):
     EXISTING: {json.dumps(existing_list)}
     OUTPUT JSON: {{ "is_duplicate": true/false, "match_name": "...", "match_owner": "..." }}
     """
-    try:
-        model = GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(prompt)
-        clean = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(clean)
-    except:
-        return None
+    return run_genai_query(prompt, expected_json=True)
 
 # 7. LENDING ASSISTANT
 def parse_lending_request(user_query, my_tools_df, family_list):
-    if not configure_genai(): return None
-    
     tools_ctx = ""
     for idx, row in my_tools_df.iterrows():
         tools_ctx += f"ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']} | Model: {row['model_no']}\n"
@@ -230,18 +233,10 @@ def parse_lending_request(user_query, my_tools_df, family_list):
       "force_override": true/false
     }}
     """
-    try:
-        model = GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(prompt)
-        clean = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(clean)
-    except Exception as e:
-        return handle_ai_error(e)
+    return run_genai_query(prompt, expected_json=True)
 
 # 8. INCINERATOR AID
 def ai_find_tools_for_deletion(user_query, tools_df):
-    if not configure_genai(): return []
-    
     tools_ctx = ""
     for idx, row in tools_df.iterrows():
         tools_ctx += f"ID: {row['id']} | Name: {row['name']} | Owner: {row['owner']} | House: {row['household']} | Status: {row['status']}\n"
@@ -254,10 +249,7 @@ def ai_find_tools_for_deletion(user_query, tools_df):
     TASK: Return a JSON list of IDs that match the deletion criteria.
     OUTPUT JSON: {{ "delete_ids": ["ID1", "ID2"] }}
     """
-    try:
-        model = GenerativeModel('gemini-2.0-flash-lite-001')
-        response = model.generate_content(prompt)
-        clean = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(clean).get("delete_ids", [])
-    except Exception as e:
-        return []
+    res = run_genai_query(prompt, expected_json=True)
+    if res and isinstance(res, dict):
+        return res.get("delete_ids", [])
+    return []
