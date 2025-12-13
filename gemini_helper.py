@@ -3,6 +3,15 @@ from vertexai.generative_models import GenerativeModel
 import streamlit as st
 import json
 import time
+import warnings
+
+# Suppress Vertex AI Deprecation Warning (Safe to ignore until June 2026)
+warnings.filterwarnings(
+    "ignore", 
+    message="This feature is deprecated", 
+    category=UserWarning, 
+    module="vertexai.generative_models"
+)
 
 def configure_genai():
     try:

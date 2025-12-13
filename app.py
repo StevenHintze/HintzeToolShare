@@ -545,7 +545,7 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
                 selected_tools = st.multiselect("Select Tools to Borrow:", t_options)
                 days_needed = st.number_input("Days Needed", min_value=1, value=7, key="borrow_days")
                 
-                if st.form_submit_button("Confirm Borrow Request", use_container_width=True):
+                if st.form_submit_button("Confirm Borrow Request", width='stretch'):
                     if selected_tools:
                         success_count = 0
                         for t_name in selected_tools:
@@ -598,7 +598,7 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
                 st.caption("Describe what happened naturally (e.g., 'I lent the drill to Shawn').")
                 with st.form("ai_lending_form"):
                     lending_query = st.text_input("Tell me what's happening:", placeholder="Type here and press Enter...")
-                    submitted = st.form_submit_button("Analyze Request", use_container_width=True)
+                    submitted = st.form_submit_button("Analyze Request", width='stretch')
                 
                 if submitted and lending_query:
                     with st.spinner("Processing..."):
@@ -690,7 +690,7 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
                 else:
                     authorized = True
 
-                if st.form_submit_button("Confirm Loan 🤝", use_container_width=True):
+                if st.form_submit_button("Confirm Loan 🤝", width='stretch'):
                     if not selected_tool_names:
                         st.error("Select at least one tool.")
                     elif not borrower:
@@ -725,7 +725,7 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
             with c_act_1:
                 move_query = st.text_input("Action Description:", placeholder="e.g. 'I sold the miter saw'", key="move_input")
             with c_act_2:
-                preview_btn = st.form_submit_button("Review Action", use_container_width=True)
+                preview_btn = st.form_submit_button("Review Action", width='stretch')
 
         if preview_btn and move_query:
             with st.spinner("Analyzing..."):
@@ -759,7 +759,7 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
             df_review = pd.DataFrame(st.session_state['pending_moves'])
             st.dataframe(df_review[["Tool", "Action"]], width="stretch", hide_index=True)
             c_y, c_n = st.columns(2)
-            if c_y.button("Confirm Update", type="primary", use_container_width=True):
+            if c_y.button("Confirm Update", type="primary", width='stretch'):
                 count = 0
                 for change in st.session_state['pending_moves']:
                     data = change['_data']
@@ -774,7 +774,7 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
                 st.session_state['pending_moves'] = None
                 time.sleep(1)
                 st.rerun()
-            if c_n.button("Cancel", use_container_width=True):
+            if c_n.button("Cancel", width='stretch'):
                 st.session_state['pending_moves'] = None
                 st.rerun()
 
@@ -812,7 +812,7 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
             with c2: 
                 raw_input = st.text_input("Paste Description", key="ai_input", placeholder="e.g. 'DEWALT Drill DCD777D1'")
             # UPDATED BUTTON TEXT AND PROGRESS BAR LOGIC
-            trigger_ai = st.form_submit_button("✨ Click to Generate Details with AI", use_container_width=True)
+            trigger_ai = st.form_submit_button("✨ Click to Generate Details with AI", width='stretch')
 
         if trigger_ai and raw_input:
             progress_text = "🤖 AI is analyzing your tool..."
@@ -889,7 +889,7 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
             st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], key="tool_safety")
             st.text_input("Capabilities", key="tool_caps")
             
-            st.form_submit_button("💾 Add to Tool Registry", use_container_width=True, on_click=save_tool_callback)
+            st.form_submit_button("💾 Add to Tool Registry", width='stretch', on_click=save_tool_callback)
 
     st.markdown("---")
     with st.expander("📜 View History of a Tool"):
@@ -949,7 +949,7 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
                 with c_ai_1:
                     filter_query = st.text_input("🤖 AI Filter:", placeholder="e.g., 'Delete all broken drills' or 'Tools owned by Ghost'")
                 with c_ai_2:
-                    submitted = st.form_submit_button("Apply Filter", use_container_width=True)
+                    submitted = st.form_submit_button("Apply Filter", width='stretch')
                 
                 if submitted:
                     if filter_query:
@@ -976,7 +976,7 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
             # Selectable Dataframe
             selection = st.dataframe(
                 display_df[['name', 'brand', 'owner', 'household', 'status']],
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
                 on_select="rerun",
                 selection_mode="multi-row"
