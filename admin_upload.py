@@ -145,7 +145,7 @@ if secret_input == st.secrets["REGISTRY_KEY"]:
     with col3:
         st.subheader("Nuclear Option")
         st.caption("Wipes and re-uploads everything.")
-        if st.button("Update EVERYTHING 🚀", type="primary", width='stretch'):
+        if st.button("Update Everything 🚀", type="primary", width='stretch'):
             f = update_family()
             t = update_tools()
             if f and t:

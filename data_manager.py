@@ -111,6 +111,12 @@ class DataManager:
         self.con.execute("UPDATE tools SET status = 'Retired', bin_location = ? WHERE id = ?", [f"Retired: {reason}", tool_id])
         self.clear_cache()
 
+    def delete_tool(self, tool_id, user_name):
+        self._archive_tool(tool_id, user_name)
+        self.con.execute("DELETE FROM tools WHERE id = ?", [tool_id])
+        self.log_event("ADMIN_DELETE", user_name, f"Permanently deleted tool {tool_id}")
+        self.clear_cache()
+
     def batch_update_tools(self, df, user_name):
         for index, row in df.iterrows():
             self._archive_tool(row['id'], user_name)
@@ -126,6 +132,21 @@ class DataManager:
         if count > 0:
             self.con.execute(f"DELETE FROM tool_history WHERE change_date < current_timestamp - INTERVAL '{days} days'")
         return count
+
+    # --- Ghost Tolls Management ---
+    def get_ghost_tools(self):
+        tools = self.get_all_tools()
+        family = self.get_family_members()
+        known_owners = set(family['name'].unique())
+        # Filter for tools where owner is not in known list AND is not None
+        ghosts = tools[~tools['owner'].isin(known_owners) & tools['owner'].notna()]
+        return ghosts
+
+    def batch_reassign_tools(self, tool_ids, new_owner, new_household):
+        for tid in tool_ids:
+            self._archive_tool(tid, f"System Reassign to {new_owner}")
+            self.con.execute("UPDATE tools SET owner = ?, household = ? WHERE id = ?", [new_owner, new_household, tid])
+        self.clear_cache()
 
     # --- Security Logging ---
     def log_event(self, event_type, email, details):

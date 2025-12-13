@@ -27,7 +27,7 @@ def handle_ai_error(e):
     st.error(f"⚠️ AI Error: {str(e)}")
     return None
 
-# 1. SHOP TEACHER
+# 1. Project Tool Manager
 def get_ai_advice(user_query, available_tools_df):
     if not configure_genai(): return "⚠️ Configuration Missing"
     
@@ -67,7 +67,7 @@ def ai_parse_tool(raw_text):
     except Exception as e:
         return handle_ai_error(e)
 
-# 3. PROJECT PLANNER (Fixed Logic)
+# 3. PROJECT PLANNER
 def get_smart_recommendations(user_query, available_tools_df, user_household, user_name):
     if not configure_genai(): return None
     
@@ -89,7 +89,7 @@ def get_smart_recommendations(user_query, available_tools_df, user_household, us
             "id": safe_get('id'), 
             "name": safe_get('name'), 
             "brand": safe_get('brand'),
-            "is_mine": is_mine, # <--- NEW FLAG
+            "is_mine": is_mine,
             "location": f"{household} - {safe_get('bin_location')}",
             "status": status, 
             "is_stationary": safe_get('is_stationary')
@@ -148,7 +148,7 @@ def ai_filter_inventory(user_query, inventory_df):
     Return JSON list of matching IDs: {{ "match_ids": ["ID1", "ID2"] }}
     """
     try:
-        model = GenerativeModel('gemini-2.5-flash')
+        model = GenerativeModel('gemini-2.0-flash-lite-001')
         response = model.generate_content(prompt)
         clean = response.text.replace("```json", "").replace("```", "").strip()
         return json.loads(clean).get("match_ids", [])
@@ -228,3 +228,27 @@ def parse_lending_request(user_query, my_tools_df, family_list):
         return json.loads(clean)
     except Exception as e:
         return handle_ai_error(e)
+
+# 8. INCINERATOR AID
+def ai_find_tools_for_deletion(user_query, tools_df):
+    if not configure_genai(): return []
+    
+    tools_ctx = ""
+    for idx, row in tools_df.iterrows():
+        tools_ctx += f"ID: {row['id']} | Name: {row['name']} | Owner: {row['owner']} | House: {row['household']} | Status: {row['status']}\n"
+    
+    prompt = f"""
+    Admin Deletion Helper.
+    QUERY: "{user_query}"
+    INVENTORY: {tools_ctx}
+    
+    TASK: Return a JSON list of IDs that match the deletion criteria.
+    OUTPUT JSON: {{ "delete_ids": ["ID1", "ID2"] }}
+    """
+    try:
+        model = GenerativeModel('gemini-2.0-flash-lite-001')
+        response = model.generate_content(prompt)
+        clean = response.text.replace("```json", "").replace("```", "").strip()
+        return json.loads(clean).get("delete_ids", [])
+    except Exception as e:
+        return []
