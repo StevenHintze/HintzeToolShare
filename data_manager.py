@@ -140,9 +140,19 @@ class DataManager:
         # or construct the interval string safely since we strictly validated 'days' as int above.
         # However, a cleaner way in standard SQL is often: current_timestamp - (INTERVAL '1' DAY * ?)
         
-        count = self.con.execute("SELECT count(*) FROM tool_history WHERE change_date < current_timestamp - (INTERVAL '1' DAY * ?)", [days]).fetchone()[0]
-        if count > 0:
-            self.con.execute("DELETE FROM tool_history WHERE change_date < current_timestamp - (INTERVAL '1' DAY * ?)", [days])
+        # Optimized: Single Atomic Query using RETURNING
+        try:
+             # DuckDB supports RETURNING or we can just rely on rowcount if available, 
+             # but fetching returned IDs is a surefire way to get the count.
+             deleted_ids = self.con.execute(
+                 "DELETE FROM tool_history WHERE change_date < current_timestamp - (INTERVAL '1' DAY * ?) RETURNING history_id", 
+                 [days]
+             ).fetchall()
+             count = len(deleted_ids)
+        except Exception as e:
+             # Fallback if RETURNING not supported in older DuckDB versions (though 1.1+ should have it)
+             count = self.con.execute("DELETE FROM tool_history WHERE change_date < current_timestamp - (INTERVAL '1' DAY * ?)", [days]).rowcount
+        
         return count
 
     # --- Ghost Tolls Management ---

@@ -63,6 +63,7 @@ def run_genai_query(prompt, model_name=DEFAULT_MODEL, expected_json=False):
         return handle_ai_error(e)
 
 # 1. Project Tool Manager
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_ai_advice(user_query, available_tools_df):
     client = get_client()
     if not client: return "⚠️ Configuration Missing"
@@ -90,6 +91,7 @@ def get_ai_advice(user_query, available_tools_df):
         return f"⚠️ Error: {str(e)}"
 
 # 2. SMART PARSER
+@st.cache_data(ttl=3600, show_spinner=False)
 def ai_parse_tool(raw_text):
     prompt = f"""
     Analyze tool description. INPUT: <user_input>{raw_text}</user_input>
@@ -99,6 +101,7 @@ def ai_parse_tool(raw_text):
     return run_genai_query(prompt, expected_json=True)
 
 # 3. PROJECT PLANNER
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_smart_recommendations(user_query, available_tools_df, user_household, user_name):
     my_tools = []
     others_tools = []
@@ -191,6 +194,7 @@ def get_smart_recommendations(user_query, available_tools_df, user_household, us
         return None
 
 # 4. INVENTORY FILTER
+@st.cache_data(ttl=3600, show_spinner=False)
 def ai_filter_inventory(user_query, inventory_df):
     context = ""
     for index, row in inventory_df.iterrows():
@@ -207,6 +211,7 @@ def ai_filter_inventory(user_query, inventory_df):
     return []
 
 # 5. SMART MOVER
+@st.cache_data(ttl=3600, show_spinner=False)
 def parse_location_update(user_query, user_tools_df):
     tool_list_str = ""
     for index, row in user_tools_df.iterrows():
@@ -221,6 +226,7 @@ def parse_location_update(user_query, user_tools_df):
     return run_genai_query(prompt, expected_json=True)
 
 # 6. DUPLICATE CHECKER
+@st.cache_data(ttl=3600, show_spinner=False)
 def check_duplicate_tool(new_tool_data, inventory_df):
     existing_list = []
     for index, row in inventory_df.iterrows():
@@ -237,6 +243,7 @@ def check_duplicate_tool(new_tool_data, inventory_df):
     return run_genai_query(prompt, expected_json=True)
 
 # 7. LENDING ASSISTANT
+@st.cache_data(ttl=3600, show_spinner=False)
 def parse_lending_request(user_query, my_tools_df, family_list):
     tools_ctx = ""
     for idx, row in my_tools_df.iterrows():
@@ -260,6 +267,7 @@ def parse_lending_request(user_query, my_tools_df, family_list):
     return run_genai_query(prompt, expected_json=True)
 
 # 8. INCINERATOR AID
+@st.cache_data(ttl=3600, show_spinner=False)
 def ai_find_tools_for_deletion(user_query, tools_df):
     tools_ctx = ""
     for idx, row in tools_df.iterrows():
@@ -279,6 +287,7 @@ def ai_find_tools_for_deletion(user_query, tools_df):
     return []
 
 # 8. BORROWING ASSISTANT
+@st.cache_data(ttl=3600, show_spinner=False)
 def parse_borrowing_request(user_query, available_pool_df):
     tools_ctx = ""
     for idx, row in available_pool_df.iterrows():
