@@ -9,7 +9,7 @@ import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.52", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.6", page_icon="🛠️")
 
 # Initialize DB (Fail-Safe + Cached)
 # Initialize DB (Fail-Safe + Cached)
@@ -233,9 +233,19 @@ def login():
     email = st.session_state.get("email_input", "").strip().lower()
     password = st.session_state.get("password_input", "")
     
-    if password == st.secrets["FAMILY_PASSWORD"]:
-        user = dm.get_user_by_email(email)
-        if user:
+    user = dm.get_user_by_email(email)
+    
+    if user:
+        # Check Role-Based Password
+        if user['role'] == 'ADMIN':
+            required_pass = st.secrets.get("ADMIN_PASSWORD")
+            if not required_pass:
+                st.error("⚠️ System Configuration Error: ADMIN_PASSWORD is missing in secrets.")
+                return
+        else:
+            required_pass = st.secrets["FAMILY_PASSWORD"]
+
+        if password == required_pass:
             dm.log_event("LOGIN", email, "Successful login")
             st.session_state["user_info"] = user
             token = dm.create_session(email)
@@ -245,11 +255,12 @@ def login():
             time.sleep(1)
             st.rerun()
         else:
-            dm.log_event("FAILED_LOGIN", email, "Email not in registry")
-            st.error(f"Email '{email}' not found in registry.")
+            dm.log_event("FAILED_LOGIN", email, "Bad Password")
+            st.error("Incorrect Password.")
     else:
-        dm.log_event("FAILED_LOGIN", email, "Bad Password")
-        st.error("Incorrect Family Password.")
+        # User not found
+        dm.log_event("FAILED_LOGIN", email, "Email not in registry")
+        st.error(f"Email '{email}' not found in registry.")
 
 if st.session_state["user_info"] is None:
     st.title("🔐 Family Login")
@@ -411,7 +422,7 @@ if st.session_state['nav_tab'] == "Arsenal":
     st.dataframe(
         filtered_df[['name', 'brand', 'Display Status', 'Location Info', 'return_date']],
         column_config={"return_date": st.column_config.DatetimeColumn("Due Back", format="D MMM")},
-        use_container_width=True
+        width='stretch'
     )
 
     st.markdown("---")
@@ -919,7 +930,7 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
             st.selectbox("Safety", ["Open", "Supervised", "Adult Only"], key="tool_safety")
             st.text_input("Capabilities", key="tool_caps")
             
-            st.form_submit_button("💾 Add to Tool Registry", use_container_width=True, on_click=save_tool_callback)
+            st.form_submit_button("💾 Add to Tool Registry", width='stretch', on_click=save_tool_callback)
 
     st.markdown("---")
     with st.expander("📜 View History of a Tool"):
