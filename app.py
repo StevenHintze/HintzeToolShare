@@ -9,7 +9,7 @@ import datetime
 import uuid
 import pandas as pd
 
-st.set_page_config(page_title="HFTS v0.9.6", page_icon="🛠️")
+st.set_page_config(page_title="HFTS v0.9.7", page_icon="🛠️")
 
 # Initialize DB (Fail-Safe + Cached)
 @st.cache_resource
