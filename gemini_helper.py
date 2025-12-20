@@ -100,9 +100,11 @@ def ai_parse_tool(raw_text):
 
 # 3. PROJECT PLANNER
 def get_smart_recommendations(user_query, available_tools_df, user_household, user_name):
-    inventory_list = []
+    my_tools = []
+    others_tools = []
+    
     for index, row in available_tools_df.iterrows():
-        status = f"Borrowed by {row.get('borrower')}" if row.get('status') == 'Borrowed' else "Available"
+        status = f"with {row.get('borrower')}" if row.get('status') == 'Borrowed' else "available"
         
         def safe_get(key):
             val = row.get(key)
@@ -110,46 +112,67 @@ def get_smart_recommendations(user_query, available_tools_df, user_household, us
             return val
 
         # Calculate Ownership Explicitly
-        owner = safe_get('owner')
-        household = safe_get('household')
-        is_mine = (owner == user_name) or (household == user_household)
+        raw_owner = safe_get('owner')
+        raw_house = safe_get('household')
+        owner_val = str(raw_owner or "").strip().lower()
+        house_val = str(raw_house or "").strip().lower()
+        curr_user_val = str(user_name or "").strip().lower()
+        curr_house_val = str(user_household or "").strip().lower()
+        
+        is_mine = False
+        if curr_user_val and owner_val == curr_user_val:
+            is_mine = True
+        elif curr_house_val and house_val == curr_house_val:
+            is_mine = True
 
-        inventory_list.append({
+        item = {
             "id": safe_get('id'), 
             "name": safe_get('name'), 
             "brand": safe_get('brand'),
-            "is_mine": is_mine,
-            "location": f"{household} - {safe_get('bin_location')}",
+            "location": f"{raw_house} - {safe_get('bin_location')}",
             "status": status, 
             "is_stationary": safe_get('is_stationary')
-        })
+        }
+        
+        if is_mine:
+            my_tools.append(item)
+        else:
+            item["owner_house"] = raw_house # Needed for borrow info
+            others_tools.append(item)
     
-    prompt_base = f"""
-    You are the Tool Manager.
+    prompt = f"""
+    You are the Hintze Family Tool Manager.
     PROJECT: "{user_query}" 
     USER CONTEXT: Name: "{user_name}", Household: "{user_household}"
-    INVENTORY: {json.dumps(inventory_list)}
     
-    TASK: Categorize tools into lists.
+    LIST 1: TOOLS I PHYSICALLY OWN (My Toolbox):
+    {json.dumps(my_tools)}
+    
+    LIST 2: OTHER FAMILY MEMBERS' TOOLS (Need to borrow):
+    {json.dumps(others_tools)}
+    
+    TASK: Categorize tools into project lists.
     
     CRITICAL LOGIC RULES:
-    1. **CHECK 'is_mine' FIRST**: If the user owns a tool (`is_mine`: true), ALWAYS put it in "locate_list", even if it's not an exact match (e.g., if project needs 'Ladder' and user owns '5ft Step Ladder', use the owned one).
-    2. **NO REDUNDANT BORROWING**: Do NOT suggest borrowing a tool if the user already has a functional equivalent in "locate_list".
-    3. **STATUS CHECK**: If `is_mine` is true but `status` says "Borrowed by...", put it in "track_down_list".
-    4. **MISSING**: Only put tools here if the user owns NOTHING similar.
+    1. **locate_list**: ONLY use tools from "LIST 1". These must be "available".
+    2. **track_down_list**: ONLY use tools from "LIST 1" that have a status "with [Name]".
+    3. **borrow_list**: ONLY use tools from "LIST 2". If a tool is needed and you find it here, suggest it for borrowing.
+    4. **missing_list**: If a tool is needed but NOT found in LIST 1 or LIST 2, put it here.
+    5. **Functional Equivalence**: If the project needs a shovel and the user has a shovel in LIST 1, do NOT suggest borrowing one from LIST 2.
+    6. **RELEVANCE**: Only include tools actually needed for the project.
     """
     
     json_structure = """
     OUTPUT JSON structure:
     {
-        "locate_list": [{"tool_name": "Exact Name from Inventory", "location": "Location field from Inventory"}],
-        "track_down_list": [{"tool_name": "Exact Name", "held_by": "Borrower Name"}],
-        "borrow_list": [{"name": "Tool Name", "household": "Owner House", "tool_id": "ID", "reason": "Why needed"}],
-        "missing_list": [{"tool_name": "Tool Name", "importance": "High/Med/Low", "advice": "Buy/Rent", "reason": "Explanation of why this is needed"}]
+        "locate_list": [{"tool_name": "Name", "location": "Location"}],
+        "track_down_list": [{"tool_name": "Name", "held_by": "Borrower Name"}],
+        "borrow_list": [{"name": "Tool Name", "household": "Owner House", "tool_id": "ID", "reason": "Reason"}],
+        "missing_list": [{"tool_name": "Tool Name", "importance": "High/Med/Low", "advice": "Buy/Rent", "reason": "Explanation"}]
     }
     """
     
-    prompt = prompt_base + json_structure
+    prompt = prompt + json_structure
     
     # Custom logic here as in original: catch structure
     res = run_genai_query(prompt, expected_json=False) # Get text first
@@ -217,7 +240,7 @@ def check_duplicate_tool(new_tool_data, inventory_df):
 def parse_lending_request(user_query, my_tools_df, family_list):
     tools_ctx = ""
     for idx, row in my_tools_df.iterrows():
-        tools_ctx += f"ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']} | Model: {row['model_no']}\n"
+        tools_ctx += f"ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']} | House: {row.get('household', 'Unknown')}\n"
     
     family_names = [f['name'] for f in family_list]
     
@@ -228,8 +251,9 @@ def parse_lending_request(user_query, my_tools_df, family_list):
     
     OUTPUT JSON:
     {{
-      "candidates": [ {{"id": "ID", "name": "Name", "confidence": "high/medium"}} ],
+      "candidates": [ {{"id": "ID", "name": "Name", "household": "House", "confidence": "high/medium"}} ],
       "borrower_name": "Name",
+      "duration_days": 7,
       "force_override": true/false
     }}
     """
@@ -253,3 +277,22 @@ def ai_find_tools_for_deletion(user_query, tools_df):
     if res and isinstance(res, dict):
         return res.get("delete_ids", [])
     return []
+
+# 8. BORROWING ASSISTANT
+def parse_borrowing_request(user_query, available_pool_df):
+    tools_ctx = ""
+    for idx, row in available_pool_df.iterrows():
+        tools_ctx += f"ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']} | House: {row['household']}\n"
+    
+    prompt = f"""
+    Borrowing Assistant. QUERY: "{user_query}"
+    AVAILABLE TOOLS: {tools_ctx}
+    
+    TASK: Identify tools and duration requested.
+    OUTPUT JSON:
+    {{
+      "candidates": [ {{"id": "ID", "name": "Name", "household": "House", "confidence": "high/medium"}} ],
+      "duration_days": 7
+    }}
+    """
+    return run_genai_query(prompt, expected_json=True)

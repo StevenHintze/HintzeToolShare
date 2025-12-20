@@ -3,7 +3,7 @@ import streamlit as st
 import extra_streamlit_components as stx
 from data_manager import DataManager
 from tools_registry import check_safety 
-from gemini_helper import ai_parse_tool, get_ai_advice, get_smart_recommendations, ai_filter_inventory, parse_location_update, check_duplicate_tool, parse_lending_request, ai_find_tools_for_deletion
+from gemini_helper import ai_parse_tool, get_ai_advice, get_smart_recommendations, ai_filter_inventory, parse_location_update, check_duplicate_tool, parse_lending_request, ai_find_tools_for_deletion, parse_borrowing_request
 import time
 import datetime
 import uuid
@@ -420,7 +420,7 @@ if st.session_state['nav_tab'] == "Arsenal":
 
     st.dataframe(
         filtered_df[['name', 'brand', 'Display Status', 'Location Info', 'return_date']],
-        column_config={"return_date": st.column_config.DatetimeColumn("Due Back", format="D MMM")},
+        column_config={"return_date": st.column_config.DatetimeColumn("Due Back", format="ddd, MMM D")},
         width='stretch'
     )
 
@@ -463,7 +463,11 @@ if st.session_state['nav_tab'] == "Return":
             return "🟢 On Track"
         my_loans['Status'] = my_loans['Due In'].apply(color_status)
 
-        st.dataframe(my_loans[['name', 'brand', 'household', 'return_date', 'Status']], width="stretch")
+        st.dataframe(
+            my_loans[['name', 'brand', 'household', 'return_date', 'Status']], 
+            column_config={"return_date": st.column_config.DateColumn("Return Date", format="ddd, MMM D")},
+            width="stretch"
+        )
         
         tool_to_return = st.selectbox("Select tool to return:", my_loans['name'], key="return_select")
         if st.button("✅ Return Selected Tool"):
@@ -479,7 +483,11 @@ if st.session_state['nav_tab'] == "Return":
     st.subheader("👀 Who has my stuff?")
     if not my_assets.empty:
         st.warning(f"You have {len(my_assets)} tools currently loaned out.")
-        st.dataframe(my_assets[['name', 'borrower', 'return_date']], width="stretch")
+        st.dataframe(
+            my_assets[['name', 'borrower', 'return_date']], 
+            column_config={"return_date": st.column_config.DateColumn("Due Back", format="ddd, MMM D")},
+            width="stretch"
+        )
         
         tool_back = st.selectbox("Select tool received:", my_assets['name'], key="owner_return_select")
         if st.button("📥 Mark as Received"):
@@ -566,7 +574,12 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
     st.header("🤝 Lending & Borrowing Center")
         
         # --- SECTION 1: BORROW TOOLS (SELF) ---
-    with st.expander("⬇️ Borrow Tools (For You)", expanded=False):
+    # Maintain expanded state via session state
+    if 'exp_borrow' not in st.session_state: st.session_state['exp_borrow'] = False
+    if 'exp_lend' not in st.session_state: st.session_state['exp_lend'] = False
+
+    with st.expander("⬇️ Borrow Tools (For You)", expanded=st.session_state['exp_borrow']):
+        st.session_state['exp_borrow'] = True # If they are seeing this code, it's expanded or being interacted with
         st.caption("Quickly borrow tools for yourself from others.")
         # Cached query
         all_tools_borrow = dm.get_all_tools()
@@ -578,37 +591,102 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
         ]
         
         if not available_only.empty:
-            with st.form("manual_borrow_multi"):
-                t_options = available_only['name'].tolist()
-                st.info(f"There are {len(t_options)} tools available to borrow.")
-                
-                selected_tools = st.multiselect("Select Tools to Borrow:", t_options)
-                days_needed = st.number_input("Days Needed", min_value=1, value=7, key="borrow_days")
-                
-                if st.form_submit_button("Confirm Borrow Request", width='stretch'):
-                    if selected_tools:
-                        success_count = 0
-                        for t_name in selected_tools:
-                            tool_row = available_only[available_only['name'] == t_name].iloc[0]
-                            if check_safety(current_user['role'], tool_row['safety_rating']):
-                                dm.borrow_tool(tool_row['id'], current_user['name'], days_needed)
-                                success_count += 1
+            method_b = st.radio("Input Method:", ["🤖 AI Assistant", "📝 Manual Selection"], horizontal=True, key="borrow_method")
+            
+            if 'borrow_stage' not in st.session_state: st.session_state['borrow_stage'] = 'manual'
+            if 'borrow_data' not in st.session_state: st.session_state['borrow_data'] = None
+
+            if method_b == "📝 Manual Selection" and st.session_state.get('borrow_stage') != 'manual':
+                st.session_state['borrow_stage'] = 'manual'
+                st.session_state['borrow_data'] = None
+
+            if method_b == "🤖 AI Assistant":
+                with st.container(border=True):
+                    st.caption("Tell me what you need (e.g., 'I need to borrow the truck for 3 days').")
+                    with st.form("ai_borrow_form"):
+                        borrow_query = st.text_input("What do you need?", placeholder="Type here and press Enter...")
+                        submitted_b = st.form_submit_button("Analyze Request", width='stretch')
+                    
+                    if submitted_b and borrow_query:
+                        with st.spinner("Processing..."):
+                            result_b = parse_borrowing_request(borrow_query, available_only)
+                            if result_b and result_b.get('candidates'):
+                                st.session_state['borrow_stage'] = 'refine'
+                                st.session_state['borrow_data'] = result_b
+                                st.rerun()
+                            elif result_b:
+                                st.warning("I couldn't find any matching tools. Please try manual selection.")
+                                st.session_state['borrow_stage'] = 'manual'
                             else:
-                                st.error(f"🚫 Safety Restriction on {t_name}")
-                        
-                        if success_count > 0:
-                            st.toast(f"✅ Successfully borrowed {success_count} tools!", icon="🚚")
-                            time.sleep(1.5)
-                            st.rerun()
-                    else:
-                        st.warning("Please select at least one tool.")
+                                st.error("Could not understand request.")
+
+            if st.session_state.get('borrow_stage') == 'refine' and st.session_state.get('borrow_data'):
+                st.divider()
+                st.info("🔎 I found multiple options. Select the ones you mean:")
+                with st.form("refine_borrow_candidates"):
+                    cands_b = st.session_state['borrow_data'].get('candidates', [])
+                    selected_cands_ids_b = []
+                    for c in cands_b:
+                        label = f"**{c['name']}**"
+                        if c.get('household'): label += f" ({c['household']})"
+                        is_checked = st.checkbox(label, value=True, key=f"b_cand_{c['id']}")
+                        if is_checked:
+                            selected_cands_ids_b.append(c['id'])
+                    
+                    if st.form_submit_button("Confirm Selection"):
+                        st.session_state['borrow_data']['tool_ids'] = selected_cands_ids_b
+                        st.session_state['borrow_stage'] = 'verify'
+                        st.rerun()
+
+            if st.session_state.get('borrow_stage') in ['verify', 'manual'] or st.session_state.get('borrow_stage') is None:
+                default_borrow_tools = []
+                default_borrow_days = 7
+                
+                if st.session_state.get('borrow_data'):
+                    data_b = st.session_state['borrow_data']
+                    if data_b.get('duration_days'):
+                        try: default_borrow_days = int(data_b['duration_days'])
+                        except: pass
+                    if data_b.get('tool_ids'):
+                        pre_sel_b = available_only[available_only['id'].isin(data_b['tool_ids'])]['name'].tolist()
+                        default_borrow_tools = pre_sel_b
+
+                with st.form("manual_borrow_multi"):
+                    t_options = available_only['name'].tolist()
+                    selected_tools = st.multiselect("Select Tools to Borrow:", t_options, default=default_borrow_tools)
+                    days_needed = st.number_input("Days Needed", min_value=1, value=default_borrow_days, key="borrow_days")
+                    
+                    if st.form_submit_button("Confirm Borrow Request", width='stretch'):
+                        if selected_tools:
+                            success_count = 0
+                            for t_name in selected_tools:
+                                tool_row = available_only[available_only['name'] == t_name].iloc[0]
+                                if check_safety(current_user['role'], tool_row['safety_rating']):
+                                    dm.borrow_tool(tool_row['id'], current_user['name'], days_needed)
+                                    success_count += 1
+                                else:
+                                    st.error(f"🚫 Safety Restriction on {t_name}")
+                            
+                            if success_count > 0:
+                                st.toast(f"✅ Successfully borrowed {success_count} tools!", icon="🚚")
+                                st.session_state['borrow_stage'] = 'manual'
+                                st.session_state['borrow_data'] = None
+                                time.sleep(1.5)
+                                st.rerun()
+                        else:
+                            st.warning("Please select at least one tool.")
         else:
             st.info("No transportable tools available from other households.")
 
     st.markdown("---")
 
     # --- SECTION 2: LEND TOOLS (OTHERS) ---
-    with st.expander("⬆️ Lend Tools (To Others)", expanded=False):
+    # Auto-expand if we are in the middle of an AI flow
+    lending_active = st.session_state.get('lend_stage') in ['refine', 'verify']
+    if lending_active: st.session_state['exp_lend'] = True
+
+    with st.expander("⬆️ Lend Tools (To Others)", expanded=st.session_state['exp_lend']):
+        st.session_state['exp_lend'] = True
         st.caption(f"Lend tools to other family members.")
         
         admin_override = False
@@ -663,7 +741,9 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
                 cands = st.session_state['lend_data'].get('candidates', [])
                 selected_cands_ids = []
                 for c in cands:
-                    is_checked = st.checkbox(f"**{c['name']}**", value=True, key=f"cand_{c['id']}")
+                    label = f"**{c['name']}**"
+                    if c.get('household'): label += f" ({c['household']})"
+                    is_checked = st.checkbox(label, value=True, key=f"cand_{c['id']}")
                     if is_checked:
                         selected_cands_ids.append(c['id'])
                 
@@ -678,6 +758,7 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
 
             default_tools = []
             default_borrower = None
+            default_days = 7
             force_safety = False
             
             if st.session_state.get('lend_data'):
@@ -685,6 +766,10 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
                 member_names = family_df['name'].tolist()
                 if data.get('borrower_name') in member_names:
                     default_borrower = data['borrower_name']
+                
+                if data.get('duration_days'):
+                    try: default_days = int(data['duration_days'])
+                    except: pass
                 
                 if data.get('tool_ids'):
                     t_ids = data['tool_ids']
@@ -710,7 +795,7 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
             with st.form("lending_form"):
                 selected_tool_names = st.multiselect("Select Tools", lending_pool['name'], default=default_tools)
                 borrower = st.selectbox("Lending To:", family_df['name'], index=family_df['name'].tolist().index(default_borrower) if default_borrower else None)
-                days = st.number_input("Duration (Days)", min_value=1, value=7)
+                days = st.number_input("Duration (Days)", min_value=1, value=default_days)
                 
                 safety_warning = []
                 requires_override = False
@@ -755,10 +840,16 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
 if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] == "Armory":
     st.header(f"🛡️ Manage {current_user['household']} Armory")
         
-        # --- QUICK ACTIONS ---
-    with st.container(border=True):
-        st.subheader("⚡ Quick Actions")
-        st.caption("Move, Sell, Donate, or Report Broken tools.")
+    # --- SECTION: INVENTORY OPERATIONS ---
+    st.subheader("📦 Inventory Operations")
+    
+    # Persistent State for Expanders
+    for key in ['exp_quick', 'exp_edit', 'exp_add', 'exp_audit', 'exp_purge', 'exp_incin']:
+        if key not in st.session_state: st.session_state[key] = (key == 'exp_quick') # Quick Actions open by default
+
+    with st.expander("⚡ Quick Actions", expanded=st.session_state['exp_quick']):
+        st.session_state['exp_quick'] = True
+        st.caption("Naturally move, sell, donate, or report broken tools using AI.")
         
         with st.form("quick_action_form"):
             c_act_1, c_act_2 = st.columns([4, 1], vertical_alignment="bottom")
@@ -819,28 +910,40 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
                 st.rerun()
 
     st.markdown("---")
-    st.subheader("📝 Edit Details")
-    if current_user['role'] == "ADMIN":
-        edit_df = dm.get_all_tools() # Cached
-        st.caption("Admin Mode: Editing ALL tools.")
-    else:
-        edit_df = dm.get_my_tools(current_user['name'])
-        st.caption("Editing Only Tools You Own.")
+    with st.expander("📝 Edit Tool Details", expanded=st.session_state['exp_edit']):
+        st.session_state['exp_edit'] = True
+        st.caption("Directly edit tool attributes in the table below.")
+        if current_user['role'] == "ADMIN":
+            edit_df = dm.get_all_tools() # Cached
+            st.info("💡 **Admin Mode:** You are editing the entire family registry.")
+        else:
+            edit_df = dm.get_my_tools(current_user['name'])
+            st.info(f"💡 Editing tools owned by **{current_user['name']}**.")
 
-    edited_tools = st.data_editor(
-        edit_df,
-        column_config={"id": st.column_config.TextColumn(disabled=True), "status": st.column_config.TextColumn(disabled=True), "borrower": st.column_config.TextColumn(disabled=True), "return_date": st.column_config.TextColumn(disabled=True), "owner": st.column_config.SelectboxColumn(options=ALL_OWNERS, required=True), "household": st.column_config.SelectboxColumn(options=ALL_HOUSEHOLDS, required=True), "safety_rating": st.column_config.SelectboxColumn(options=["Open", "Supervised", "Adult Only"])},
-        hide_index=True,
-        key="tool_editor"
-    )
-    if st.button("💾 Save Changes"):
-        dm.batch_update_tools(edited_tools, current_user['name'])
-        st.toast("Inventory updated successfully!", icon="💾")
-        time.sleep(1)
-        st.rerun()
+        edited_tools = st.data_editor(
+            edit_df,
+            column_config={
+                "id": st.column_config.TextColumn("ID", disabled=True, width="small"),
+                "status": st.column_config.TextColumn("Status", disabled=True),
+                "borrower": st.column_config.TextColumn("Borrower", disabled=True),
+                "return_date": st.column_config.DateColumn("Due Back", format="ddd, MMM D", disabled=True),
+                "owner": st.column_config.SelectboxColumn("Owner", options=ALL_OWNERS, required=True),
+                "household": st.column_config.SelectboxColumn("Household", options=ALL_HOUSEHOLDS, required=True),
+                "safety_rating": st.column_config.SelectboxColumn("Safety", options=["Open", "Supervised", "Adult Only"])
+            },
+            hide_index=True,
+            key="tool_editor",
+            use_container_width=True
+        )
+        if st.button("💾 Save Table Changes", width="stretch"):
+            dm.batch_update_tools(edited_tools, current_user['name'])
+            st.toast("Inventory updated successfully!", icon="💾")
+            time.sleep(1)
+            st.rerun()
 
     st.markdown("---")
-    with st.expander("➕ Add New Tool"):
+    with st.expander("➕ Add New Tool", expanded=st.session_state['exp_add']):
+        st.session_state['exp_add'] = True
         st.caption("Auto-fill with AI or enter manually.")
         
         with st.form("ai_prefill_form"):
@@ -932,17 +1035,26 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
             st.form_submit_button("💾 Add to Tool Registry", width='stretch', on_click=save_tool_callback)
 
     st.markdown("---")
-    with st.expander("📜 View History of a Tool"):
-        hist_tool_name = st.selectbox("Select tool history:", edit_df['name'].sort_values().unique())
+    with st.expander("📜 View Audit History", expanded=st.session_state['exp_audit']):
+        st.session_state['exp_audit'] = True
+        st.caption("Track changes and historical states for any tool.")
+        hist_tool_name = st.selectbox("Select tool to investigate:", edit_df['name'].sort_values().unique())
         if hist_tool_name:
             hist_tid = edit_df[edit_df['name'] == hist_tool_name].iloc[0]['id']
             history = dm.get_tool_history(hist_tid)
-            if not history.empty: st.dataframe(history)
+            if not history.empty: 
+                st.dataframe(
+                    history, 
+                    column_config={"change_date": st.column_config.DatetimeColumn("Date", format="D MMM, h:mm a")},
+                    width="stretch"
+                )
             else: st.caption("No history records found.")
 
     if current_user['role'] == "ADMIN":
         st.markdown("---")
-        with st.expander("🧹 Clean Up Old Tool History"):
+        st.subheader("🛠️ Admin Tools")
+        with st.expander("🧹 Clean Up Old Tool History", expanded=st.session_state['exp_purge']):
+            st.session_state['exp_purge'] = True
             if st.button("🧹 Purge Stuff Older than 30 Days"):
                 deleted = dm.purge_old_history(30)
                 st.toast(f"Removed {deleted} old records.", icon="🗑️")
@@ -950,7 +1062,8 @@ if current_user['role'] in ["ADMIN", "ADULT"] and st.session_state['nav_tab'] ==
 
 
         st.markdown("---")
-        with st.expander("🗑️ The Tool Incinerator (Admin Only)"):
+        with st.expander("🗑️ The Tool Incinerator (Admin Only)", expanded=st.session_state['exp_incin']):
+            st.session_state['exp_incin'] = True
             st.markdown("#### 👻 Ghost Tool Detector")
             st.caption("Find and manage tools with missing owners.")
             if st.button("Scan for Ghost Tools"):
