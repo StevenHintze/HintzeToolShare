@@ -19,9 +19,13 @@ def check_safety(user_role, tool_safety):
     if user_role == "ADULT": 
         return True
     
-    # 2. Children are blocked from "Adult Only" tools
-    if user_role == "CHILD" and tool_safety == "Adult Only": 
+    # 2. Children are restricted
+    if user_role == "CHILD":
+        # Allow only explicitly safe categories
+        if tool_safety in ["Open", "Supervised"]:
+            return True
+        # Block "Adult Only" and any unknown/undefined ratings
         return False
         
-    # 3. Default: Allow (e.g. Child borrowing Open/Supervised)
+    # 3. Default: Allow (Adults/Admins)
     return True

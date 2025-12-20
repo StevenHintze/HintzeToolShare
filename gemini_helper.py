@@ -77,7 +77,7 @@ def get_ai_advice(user_query, available_tools_df):
     You are the "Hintze Family Tool Manager." 
     Analyze the user's project and recommend tools from the INVENTORY.
     INVENTORY: {tool_context}
-    USER QUESTION: "{user_query}"
+    USER QUESTION: <user_input>{user_query}</user_input>
     """
     try:
         response = client.models.generate_content(
@@ -92,7 +92,7 @@ def get_ai_advice(user_query, available_tools_df):
 # 2. SMART PARSER
 def ai_parse_tool(raw_text):
     prompt = f"""
-    Analyze tool description. INPUT: "{raw_text}"
+    Analyze tool description. INPUT: <user_input>{raw_text}</user_input>
     REQUIREMENTS: Name (Title Case), Brand, Model, Power, Safety, Capabilities, Stationary.
     OUTPUT JSON: {{ "name": "...", "brand": "...", "model_no": "...", "power_source": "...", "safety": "...", "capabilities": "...", "is_stationary": true/false }}
     """
@@ -142,7 +142,7 @@ def get_smart_recommendations(user_query, available_tools_df, user_household, us
     
     prompt = f"""
     You are the Hintze Family Tool Manager.
-    PROJECT: "{user_query}" 
+    PROJECT: <user_input>{user_query}</user_input> 
     USER CONTEXT: Name: "{user_name}", Household: "{user_household}"
     
     LIST 1: TOOLS I PHYSICALLY OWN (My Toolbox):
@@ -197,7 +197,7 @@ def ai_filter_inventory(user_query, inventory_df):
         context += f"ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']} | Cap: {row['capabilities']}\n"
     
     prompt = f"""
-    Search Engine. Query: "{user_query}"
+    Search Engine. Query: <user_input>{user_query}</user_input>
     Inventory: {context}
     return JSON list of matching IDs: {{ "match_ids": ["ID1", "ID2"] }}
     """
@@ -213,7 +213,7 @@ def parse_location_update(user_query, user_tools_df):
         tool_list_str += f"- ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']}\n"
         
     prompt = f"""
-    Inventory Manager. REQUEST: "{user_query}"
+    Inventory Manager. REQUEST: <user_input>{user_query}</user_input>
     TOOLS: {tool_list_str}
     TASK: Identify action (MOVE or RETIRE).
     OUTPUT JSON: {{ "updates": [ {{ "tool_id": "...", "action": "MOVE/RETIRE", "new_bin": "...", "reason": "..." }} ] }}
@@ -245,7 +245,7 @@ def parse_lending_request(user_query, my_tools_df, family_list):
     family_names = [f['name'] for f in family_list]
     
     prompt = f"""
-    Lending Assistant. QUERY: "{user_query}"
+    Lending Assistant. QUERY: <user_input>{user_query}</user_input>
     MY TOOLS: {tools_ctx}
     FAMILY: {json.dumps(family_names)}
     
@@ -267,7 +267,7 @@ def ai_find_tools_for_deletion(user_query, tools_df):
     
     prompt = f"""
     Admin Deletion Helper.
-    QUERY: "{user_query}"
+    QUERY: <user_input>{user_query}</user_input>
     INVENTORY: {tools_ctx}
     
     TASK: Return a JSON list of IDs that match the deletion criteria.
@@ -285,7 +285,7 @@ def parse_borrowing_request(user_query, available_pool_df):
         tools_ctx += f"ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']} | House: {row['household']}\n"
     
     prompt = f"""
-    Borrowing Assistant. QUERY: "{user_query}"
+    Borrowing Assistant. QUERY: <user_input>{user_query}</user_input>
     AVAILABLE TOOLS: {tools_ctx}
     
     TASK: Identify tools and duration requested.
