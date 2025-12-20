@@ -5,6 +5,7 @@ import uuid
 import json
 import datetime
 import requests
+import secrets
 
 # --- CACHED HELPERS (Outside Class to avoid hashing 'self') ---
 # These functions handle the actual data fetching. 
@@ -128,9 +129,20 @@ class DataManager:
         self.clear_cache()
 
     def purge_old_history(self, days=30):
-        count = self.con.execute(f"SELECT count(*) FROM tool_history WHERE change_date < current_timestamp - INTERVAL '{days} days'").fetchone()[0]
+        # Ensure days is an integer to prevent injection if passed loosely, though parameterization helps too
+        if not isinstance(days, int):
+            try:
+                days = int(days)
+            except ValueError:
+                return 0
+        
+        # DuckDB interval parameterization can be tricky, so we'll use a safe integer bind for the days value if possible, 
+        # or construct the interval string safely since we strictly validated 'days' as int above.
+        # However, a cleaner way in standard SQL is often: current_timestamp - (INTERVAL '1' DAY * ?)
+        
+        count = self.con.execute("SELECT count(*) FROM tool_history WHERE change_date < current_timestamp - (INTERVAL '1' DAY * ?)", [days]).fetchone()[0]
         if count > 0:
-            self.con.execute(f"DELETE FROM tool_history WHERE change_date < current_timestamp - INTERVAL '{days} days'")
+            self.con.execute("DELETE FROM tool_history WHERE change_date < current_timestamp - (INTERVAL '1' DAY * ?)", [days])
         return count
 
     # --- Ghost Tolls Management ---
@@ -164,15 +176,16 @@ class DataManager:
 
     # --- Standard Methods ---
     def borrow_tool(self, tool_id, user, days):
-        self.con.execute(f"UPDATE tools SET status='Borrowed', borrower='{user}', return_date=current_date + INTERVAL '{days} days' WHERE id='{tool_id}'")
+        # Parameterized query to prevent SQLi
+        self.con.execute("UPDATE tools SET status='Borrowed', borrower=?, return_date=current_date + (INTERVAL '1' DAY * ?) WHERE id=?", [user, days, tool_id])
         self.clear_cache() # Update UI immediately
     
     def return_tool(self, tool_id):
-        self.con.execute(f"UPDATE tools SET status='Available', borrower=NULL, return_date=NULL WHERE id='{tool_id}'")
+        self.con.execute("UPDATE tools SET status='Available', borrower=NULL, return_date=NULL WHERE id=?", [tool_id])
         self.clear_cache()
 
     def extend_loan(self, tool_id, extra_days):
-        self.con.execute(f"UPDATE tools SET return_date = return_date + INTERVAL '{extra_days} days' WHERE id='{tool_id}'")
+        self.con.execute("UPDATE tools SET return_date = return_date + (INTERVAL '1' DAY * ?) WHERE id=?", [extra_days, tool_id])
         self.clear_cache()
 
     def get_user_by_email(self, email):
@@ -182,8 +195,8 @@ class DataManager:
 
     # --- Session Security ---
     def create_session(self, email):
-        token = str(uuid.uuid4())
-        self.con.execute(f"INSERT INTO sessions VALUES ('{token}', '{email}', current_timestamp, current_timestamp + INTERVAL '7 days')")
+        token = secrets.token_urlsafe(32)
+        self.con.execute("INSERT INTO sessions VALUES (?, ?, current_timestamp, current_timestamp + INTERVAL '7 days')", [token, email])
         return token
 
     def get_user_from_session(self, token):
