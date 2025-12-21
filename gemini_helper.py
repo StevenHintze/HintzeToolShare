@@ -4,6 +4,19 @@ import streamlit as st
 import json
 import time
 
+# Import Centralized Prompts
+from prompts import (
+    prompt_project_advice,
+    prompt_tool_parser,
+    prompt_smart_recs,
+    prompt_inventory_filter,
+    prompt_location_update,
+    prompt_duplicate_check,
+    prompt_lending_request,
+    prompt_deletion_helper,
+    prompt_borrowing_request
+)
+
 # Feature Configuration
 # Using gemini-2.0-flash as the new standard model
 DEFAULT_MODEL = "gemini-2.0-flash" 
@@ -13,15 +26,12 @@ def get_client():
     """Initializes and returns the Google Gen AI Client using Service Account API Key."""
     try:
         api_key = st.secrets.get("VERTEX_API_KEY")
-        project_id = st.secrets.get("GCP_PROJECT")
-        location = st.secrets.get("GCP_LOCATION", "us-west4")
         
         if not api_key:
             st.error("⚠️ Server Error: VERTEX_API_KEY not found in secrets.")
             return None
             
-        # Initialize Client for Vertex AI with API Key (Project/Location inferred or not needed with Key)
-        # Note: 'vertexai=True' enables the Vertex AI backend.
+        # Initialize Client for Vertex AI with API Key
         client = genai.Client(
             vertexai=True,
             api_key=api_key
@@ -55,8 +65,11 @@ def run_genai_query(prompt, model_name=DEFAULT_MODEL, expected_json=False):
             clean = text.replace("```json", "").replace("```", "").strip()
             # Try to catch simple formatting issues
             if "{" in clean:
-                return json.loads(clean)
-            return {} # Or raise error?
+                try:
+                    return json.loads(clean)
+                except:
+                    pass # Fallthrough if json load fails directly
+            return {} 
             
         return text
     except Exception as e:
@@ -74,12 +87,8 @@ def get_ai_advice(user_query, available_tools_df):
         stat_note = "[STATIONARY]" if row.get('is_stationary') else ""
         tool_context += f"- {row['name']} [{details}] {stat_note} (Safety: {row['safety_rating']}, Caps: {row['capabilities']})\n"
 
-    prompt = f"""
-    You are the "Hintze Family Tool Manager." 
-    Analyze the user's project and recommend tools from the INVENTORY.
-    INVENTORY: {tool_context}
-    USER QUESTION: <user_input>{user_query}</user_input>
-    """
+    prompt = prompt_project_advice(tool_context, user_query)
+    
     try:
         response = client.models.generate_content(
             model=DEFAULT_MODEL,
@@ -93,11 +102,7 @@ def get_ai_advice(user_query, available_tools_df):
 # 2. SMART PARSER
 @st.cache_data(ttl=3600, show_spinner=False)
 def ai_parse_tool(raw_text):
-    prompt = f"""
-    Analyze tool description. INPUT: <user_input>{raw_text}</user_input>
-    REQUIREMENTS: Name (Title Case), Brand, Model, Power, Safety, Capabilities, Stationary.
-    OUTPUT JSON: {{ "name": "...", "brand": "...", "model_no": "...", "power_source": "...", "safety": "...", "capabilities": "...", "is_stationary": true/false }}
-    """
+    prompt = prompt_tool_parser(raw_text)
     return run_genai_query(prompt, expected_json=True)
 
 # 3. PROJECT PLANNER
@@ -143,39 +148,7 @@ def get_smart_recommendations(user_query, available_tools_df, user_household, us
             item["owner_house"] = raw_house # Needed for borrow info
             others_tools.append(item)
     
-    prompt = f"""
-    You are the Hintze Family Tool Manager.
-    PROJECT: <user_input>{user_query}</user_input> 
-    USER CONTEXT: Name: "{user_name}", Household: "{user_household}"
-    
-    LIST 1: TOOLS I PHYSICALLY OWN (My Toolbox):
-    {json.dumps(my_tools)}
-    
-    LIST 2: OTHER FAMILY MEMBERS' TOOLS (Need to borrow):
-    {json.dumps(others_tools)}
-    
-    TASK: Categorize tools into project lists.
-    
-    CRITICAL LOGIC RULES:
-    1. **locate_list**: ONLY use tools from "LIST 1". These must be "available".
-    2. **track_down_list**: ONLY use tools from "LIST 1" that have a status "with [Name]".
-    3. **borrow_list**: ONLY use tools from "LIST 2". If a tool is needed and you find it here, suggest it for borrowing.
-    4. **missing_list**: If a tool is needed but NOT found in LIST 1 or LIST 2, put it here.
-    5. **Functional Equivalence**: If the project needs a shovel and the user has a shovel in LIST 1, do NOT suggest borrowing one from LIST 2.
-    6. **RELEVANCE**: Only include tools actually needed for the project.
-    """
-    
-    json_structure = """
-    OUTPUT JSON structure:
-    {
-        "locate_list": [{"tool_name": "Name", "location": "Location"}],
-        "track_down_list": [{"tool_name": "Name", "held_by": "Borrower Name"}],
-        "borrow_list": [{"name": "Tool Name", "household": "Owner House", "tool_id": "ID", "reason": "Reason"}],
-        "missing_list": [{"tool_name": "Tool Name", "importance": "High/Med/Low", "advice": "Buy/Rent", "reason": "Explanation"}]
-    }
-    """
-    
-    prompt = prompt + json_structure
+    prompt = prompt_smart_recs(user_query, user_name, user_household, my_tools, others_tools)
     
     # Custom logic here as in original: catch structure
     res = run_genai_query(prompt, expected_json=False) # Get text first
@@ -200,11 +173,7 @@ def ai_filter_inventory(user_query, inventory_df):
     for index, row in inventory_df.iterrows():
         context += f"ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']} | Cap: {row['capabilities']}\n"
     
-    prompt = f"""
-    Search Engine. Query: <user_input>{user_query}</user_input>
-    Inventory: {context}
-    return JSON list of matching IDs: {{ "match_ids": ["ID1", "ID2"] }}
-    """
+    prompt = prompt_inventory_filter(user_query, context)
     res = run_genai_query(prompt, model_name=CHEAPEST_MODEL, expected_json=True)
     if res and isinstance(res, dict):
         return res.get("match_ids", [])
@@ -217,12 +186,7 @@ def parse_location_update(user_query, user_tools_df):
     for index, row in user_tools_df.iterrows():
         tool_list_str += f"- ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']}\n"
         
-    prompt = f"""
-    Inventory Manager. REQUEST: <user_input>{user_query}</user_input>
-    TOOLS: {tool_list_str}
-    TASK: Identify action (MOVE or RETIRE).
-    OUTPUT JSON: {{ "updates": [ {{ "tool_id": "...", "action": "MOVE/RETIRE", "new_bin": "...", "reason": "..." }} ] }}
-    """
+    prompt = prompt_location_update(user_query, tool_list_str)
     return run_genai_query(prompt, expected_json=True)
 
 # 6. DUPLICATE CHECKER
@@ -234,12 +198,7 @@ def check_duplicate_tool(new_tool_data, inventory_df):
     
     new_str = f"{new_tool_data.get('name')} {new_tool_data.get('brand')} {new_tool_data.get('model_no')}"
     
-    prompt = f"""
-    Check for duplicates.
-    NEW: {new_str}
-    EXISTING: {json.dumps(existing_list)}
-    OUTPUT JSON: {{ "is_duplicate": true/false, "match_name": "...", "match_owner": "..." }}
-    """
+    prompt = prompt_duplicate_check(new_str, existing_list)
     return run_genai_query(prompt, expected_json=True)
 
 # 7. LENDING ASSISTANT
@@ -251,19 +210,7 @@ def parse_lending_request(user_query, my_tools_df, family_list):
     
     family_names = [f['name'] for f in family_list]
     
-    prompt = f"""
-    Lending Assistant. QUERY: <user_input>{user_query}</user_input>
-    MY TOOLS: {tools_ctx}
-    FAMILY: {json.dumps(family_names)}
-    
-    OUTPUT JSON:
-    {{
-      "candidates": [ {{"id": "ID", "name": "Name", "household": "House", "confidence": "high/medium"}} ],
-      "borrower_name": "Name",
-      "duration_days": 7,
-      "force_override": true/false
-    }}
-    """
+    prompt = prompt_lending_request(user_query, tools_ctx, family_names)
     return run_genai_query(prompt, expected_json=True)
 
 # 8. INCINERATOR AID
@@ -273,14 +220,7 @@ def ai_find_tools_for_deletion(user_query, tools_df):
     for idx, row in tools_df.iterrows():
         tools_ctx += f"ID: {row['id']} | Name: {row['name']} | Owner: {row['owner']} | House: {row['household']} | Status: {row['status']}\n"
     
-    prompt = f"""
-    Admin Deletion Helper.
-    QUERY: <user_input>{user_query}</user_input>
-    INVENTORY: {tools_ctx}
-    
-    TASK: Return a JSON list of IDs that match the deletion criteria.
-    OUTPUT JSON: {{ "delete_ids": ["ID1", "ID2"] }}
-    """
+    prompt = prompt_deletion_helper(user_query, tools_ctx)
     res = run_genai_query(prompt, expected_json=True)
     if res and isinstance(res, dict):
         return res.get("delete_ids", [])
@@ -293,15 +233,5 @@ def parse_borrowing_request(user_query, available_pool_df):
     for idx, row in available_pool_df.iterrows():
         tools_ctx += f"ID: {row['id']} | Name: {row['name']} | Brand: {row['brand']} | House: {row['household']}\n"
     
-    prompt = f"""
-    Borrowing Assistant. QUERY: <user_input>{user_query}</user_input>
-    AVAILABLE TOOLS: {tools_ctx}
-    
-    TASK: Identify tools and duration requested.
-    OUTPUT JSON:
-    {{
-      "candidates": [ {{"id": "ID", "name": "Name", "household": "House", "confidence": "high/medium"}} ],
-      "duration_days": 7
-    }}
-    """
+    prompt = prompt_borrowing_request(user_query, tools_ctx)
     return run_genai_query(prompt, expected_json=True)
