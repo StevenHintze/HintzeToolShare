@@ -1,7 +1,7 @@
 import streamlit.components.v1 as components
 import streamlit as st
 import extra_streamlit_components as stx
-from data_manager import DataManager
+from core.data_manager import DataManager
 import time
 import datetime
 
@@ -12,7 +12,8 @@ from views.lending import render_lending
 from views.return_tools import render_return_tools
 from views.armory import render_armory
 
-st.set_page_config(page_title="HFTS v0.9.8", page_icon="🛠️")
+
+st.set_page_config(page_title="HFTS v0.9.9", page_icon="🛠️")
 
 # Initialize DB (Fail-Safe + Cached)
 @st.cache_resource

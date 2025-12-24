@@ -1,7 +1,8 @@
 import streamlit as st
 import time
-from gemini_helper import ai_filter_inventory
-from tools_registry import check_safety
+from core.gemini_helper import ai_filter_inventory
+from core.tools_registry import check_safety
+
 
 def render_arsenal(dm, current_user):
     st.header("🧰 Tool Arsenal (Hintze Family Tools)")

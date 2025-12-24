@@ -24,11 +24,17 @@ if "REGISTRY_KEY" not in st.secrets:
 def update_family():
     """Reads family_registry.json and replaces the DB table."""
     try:
-        with open('family_registry.json', 'r') as f:
+        # Assuming script run from root or logic needs adjustment.
+        # Let's try flexible pathing
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        data_path = os.path.join(base_path, 'data', 'family_registry.json')
+        
+        with open(data_path, 'r') as f:
             family_list = json.load(f)
         
         if isinstance(family_list, dict):
             family_list = list(family_list.values())[0] if family_list else []
+
 
         df_family = pd.DataFrame(family_list)
         
@@ -48,7 +54,10 @@ def update_family():
 def update_tools():
     """Reads tools_registry.json and replaces the DB table."""
     try:
-        with open('tools_registry.json', 'r') as f:
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        data_path = os.path.join(base_path, 'data', 'tools_registry.json')
+
+        with open(data_path, 'r') as f:
             tool_list = json.load(f)
 
         if isinstance(tool_list, dict):
@@ -56,6 +65,7 @@ def update_tools():
                 if isinstance(val, list):
                     tool_list = val
                     break
+
 
         # Pre-process defaults
         for t in tool_list:

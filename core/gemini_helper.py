@@ -5,17 +5,20 @@ import json
 import time
 
 # Import Centralized Prompts
-from prompts import (
+from .prompts import (
     prompt_project_advice,
     prompt_tool_parser,
+
     prompt_smart_recs,
     prompt_inventory_filter,
     prompt_location_update,
     prompt_duplicate_check,
     prompt_lending_request,
     prompt_deletion_helper,
-    prompt_borrowing_request
+    prompt_borrowing_request,
+    prompt_return_request
 )
+
 
 # Feature Configuration
 # Using gemini-2.0-flash as the new standard model
@@ -235,3 +238,18 @@ def parse_borrowing_request(user_query, available_pool_df):
     
     prompt = prompt_borrowing_request(user_query, tools_ctx)
     return run_genai_query(prompt, expected_json=True)
+
+# 9. RETURN ASSISTANT
+@st.cache_data(ttl=3600, show_spinner=False)
+def parse_return_request(user_query, my_loans_df, my_assets_df):
+    loans_ctx = ""
+    for idx, row in my_loans_df.iterrows():
+        loans_ctx += f"ID: {row['id']} | Name: {row['name']} | Due: {row['return_date']}\n"
+        
+    assets_ctx = ""
+    for idx, row in my_assets_df.iterrows():
+        assets_ctx += f"ID: {row['id']} | Name: {row['name']} | With: {row['borrower']} | Due: {row['return_date']}\n"
+    
+    prompt = prompt_return_request(user_query, loans_ctx, assets_ctx)
+    return run_genai_query(prompt, expected_json=True)
+

@@ -9,7 +9,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Mock streamlit before importing data_manager
 with patch.dict(sys.modules, {'streamlit': MagicMock()}):
-    from data_manager import DataManager
+    from core.data_manager import DataManager
+
 
 class TestDataManager(unittest.TestCase):
     def setUp(self):

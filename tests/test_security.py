@@ -5,7 +5,8 @@ import os
 # Add parent directory to path so we can import modules
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tools_registry import check_safety
+from core.tools_registry import check_safety
+
 
 class TestSafetyLogic(unittest.TestCase):
     def test_admin_access(self):

@@ -1,7 +1,8 @@
 import streamlit as st
 import time
-from gemini_helper import parse_borrowing_request, parse_lending_request
-from tools_registry import check_safety
+from core.gemini_helper import parse_borrowing_request, parse_lending_request
+from core.tools_registry import check_safety
+
 
 def render_lending(dm, current_user):
     st.header("🤝 Lending & Borrowing Center")

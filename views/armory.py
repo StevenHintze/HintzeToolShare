@@ -2,8 +2,9 @@ import streamlit as st
 import time
 import pandas as pd
 import uuid
-from data_manager import DataManager
-from gemini_helper import parse_location_update, ai_parse_tool, check_duplicate_tool, ai_find_tools_for_deletion
+from core.data_manager import DataManager
+from core.gemini_helper import parse_location_update, ai_parse_tool, check_duplicate_tool, ai_find_tools_for_deletion
+
 
 def render_armory(dm: DataManager, current_user):
     st.header(f"🛡️ Manage {current_user['household']} Armory")

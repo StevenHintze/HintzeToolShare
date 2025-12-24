@@ -110,3 +110,24 @@ def prompt_borrowing_request(user_query, tools_ctx):
       "duration_days": 7
     }}
     """
+
+def prompt_return_request(user_query, loans_ctx, received_ctx):
+    return f"""
+    Return Assistant.
+    QUERY: <user_input>{user_query}</user_input>
+    
+    LIST 1: TOOLS I BORROWED (Return Loan):
+    {loans_ctx}
+    
+    LIST 2: MY TOOLS WITH OTHERS (Mark Received):
+    {received_ctx}
+    
+    TASK: Identify intent and tools.
+    intent: "RETURN_LOAN" (Giving back) or "MARK_RECEIVED" (Getting back).
+    
+    OUTPUT JSON:
+    {{
+      "intent": "RETURN_LOAN" or "MARK_RECEIVED",
+      "tool_ids": ["ID1", "ID2"]
+    }}
+    """

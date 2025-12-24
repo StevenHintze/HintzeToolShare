@@ -1,6 +1,7 @@
 import streamlit as st
 import time
-from gemini_helper import get_smart_recommendations
+from core.gemini_helper import get_smart_recommendations
+
 
 def render_planner(dm, current_user):
     st.header("🏗️ Project Planner")
@@ -33,7 +34,7 @@ def render_planner(dm, current_user):
                 st.markdown(f"- **{clean_name}** ({item.get('location', 'Home')})")
         
         if recs.get('track_down_list'):
-            st.warning("⚠️ **You own these, but they are gone:**")
+            st.warning("⚠️ **You own these, but they are borrowed by someone**")
             for item in recs['track_down_list']:
                 clean_name = item['tool_name'].replace("**", "").strip()
                 st.markdown(f"- **{clean_name}** is with **{item['held_by']}**")
